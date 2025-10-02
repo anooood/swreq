@@ -1,0 +1,8 @@
+langchain
+transformers
+fastapi
+pydantic
+streamlit
+requests
+pycparser
+regex
