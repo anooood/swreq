@@ -1,7 +1,7 @@
 <h2>Project Structure</h2>
 <br>├── rag_server.py (FastAPI server script)
 <br>├── query_ui.py (Streamlit UI)
-<br>├── 3_MCP_Application/cmake-src/src (Input folder for codebase)
+<br>├── P3_MCP_Application/cmake-src/src (Input folder for codebase)
 <br>├── requirements.txt (Python dependencies)
 <br>└── README.md
 
