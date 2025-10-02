@@ -1,7 +1,7 @@
 <h2>Project Structure</h2>
 <br>├── rag_server.py (FastAPI server script)
 <br>├── query_ui.py (Streamlit UI)
-<br>├── data/ (Input folder for files)
+<br>├── 3_MCP_Application/cmake-src/src (Input folder for codebase)
 <br>├── requirements.txt (Python dependencies)
 <br>└── README.md
 
@@ -26,7 +26,7 @@ venv\Scripts\activate      # on Windows
 <pre><code>pip install -r requirements.txt</code></pre>
 
 <h2>Input Data</h2>
-Move the codebase **P3_MCP_Application/cmake-src/src** inside the repo's directory folder.
+Move the codebase <b>P3_MCP_Application/cmake-src/src</b> inside the repo's directory folder.
 
 <h2>Running the Application</h2>
 
