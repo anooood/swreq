@@ -37,3 +37,5 @@ Move the codebase <b>P3_MCP_Application/cmake-src/src</b> inside the repo's dire
 <br>Open a new terminal (keep FastAPI running) and run:
 <pre><code>streamlit run query_ui.py</code></pre>
 <br>The frontend will launch at: http://localhost:8501
+
+<h2>END</h2>
