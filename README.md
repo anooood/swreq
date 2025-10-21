@@ -1,5 +1,5 @@
 <h2>Project Structure</h2>
-<br>├── rag_server.py (FastAPI LLM server script)
+<br>├── llm_server.py (FastAPI LLM server script)
 <br>├── pre_processing.py (Pre-processing script for C files)
 <br>├── prompt_templates.py (LLM Prompts)
 <br>├── query_ui.py (Streamlit UI)
@@ -35,7 +35,7 @@ Copy the codebase files inside the local path <b>P3_MCP_Application/cmake-src/sr
 
 1. Ensure CUDA is available
 2. Start the FastAPI Server
-<pre><code>uvicorn rag_server:app --host 0.0.0.0 --port 8000</code></pre>
+<pre><code>uvicorn llm_server:app --host 0.0.0.0 --port 8000</code></pre>
 2. Start the Streamlit UI
 <br>Open a new terminal (keep FastAPI running) and run:
 <pre><code>streamlit run query_ui.py</code></pre>
