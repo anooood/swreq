@@ -26,7 +26,7 @@ venv\Scripts\activate      # on Windows
 <pre><code>pip install -r requirements.txt</code></pre>
 
 <h2>Input Data</h2>
-Move the codebase <b>P3_MCP_Application/cmake-src/src</b> inside the repo's directory folder.
+Copy the codebase files inside the local path <b>P3_MCP_Application/cmake-src/src</b> into the same repo's path.
 
 <h2>Running the Application</h2>
 
