@@ -1,7 +1,10 @@
 <h2>Project Structure</h2>
-<br>├── rag_server.py (FastAPI server script)
+<br>├── rag_server.py (FastAPI LLM server script)
+<br>├── pre_processing.py (Pre-processing script for C files)
+<br>├── prompt_templates.py (LLM Prompts)
 <br>├── query_ui.py (Streamlit UI)
 <br>├── P3_MCP_Application/cmake-src/src (Input folder for codebase)
+<br>├── C_Parsed (folder for pre-processed C files)
 <br>├── requirements.txt (Python dependencies)
 <br>└── README.md
 
@@ -26,7 +29,7 @@ venv\Scripts\activate      # on Windows
 <pre><code>pip install -r requirements.txt</code></pre>
 
 <h2>Input Data</h2>
-Move the codebase <b>P3_MCP_Application/cmake-src/src</b> inside the repo's directory folder.
+Copy the codebase files inside the local path <b>P3_MCP_Application/cmake-src/src</b> into the same repo's path.
 
 <h2>Running the Application</h2>
 
