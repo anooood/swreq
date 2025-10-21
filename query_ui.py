@@ -4,7 +4,7 @@ import requests
 import glob
 from pathlib import Path
 from pre_processing import pre_processing, generate_functions, extract_header_comments
-from templates import name_prompt_template, reqs_prompt_template
+from prompt_templates import name_prompt_template, reqs_prompt_template
 
 SERVER_URL = "http://<server-ip>:8000/generate"
 
