@@ -28,6 +28,33 @@ venv\Scripts\activate      # on Windows
 
 <pre><code>pip install -r requirements.txt</code></pre>
 
+4. Install GNU C Compiler (GCC)
+
+<pre><code>
+sudo apt-get update
+sudo apt-get install -y build-essential
+sudo apt-get install -y libc6-dev
+</code></pre>
+
+<br>If <b>fake_libc_include</b> folder is missing, create it manually.
+<br>First, go to pycparser library folder, you can find its location by executing:
+
+<pre><code>
+import pycparser
+print(pycparser.__file__)
+</code></pre>
+
+<br>Then, create the "fake_libc_include" folder:
+<pre><code>
+mkdir -p fake_libc_include
+</code></pre>
+
+<br>Add the fake header files to the folder:
+<pre><code>
+git clone https://github.com/eliben/pycparser.git
+cp -r pycparser/utils/fake_libc_include .
+</code></pre>
+
 <h2>Input Data</h2>
 Copy the codebase files inside the local path <b>P3_MCP_Application/cmake-src/src</b> into the same repo's path.
 
