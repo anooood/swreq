@@ -1,8 +1,11 @@
-langchain
+pycparser
+regex
+torch
 transformers
 fastapi
 pydantic
 streamlit
 requests
-pycparser
-regex
+pandas
+python-docx
+openpyxl

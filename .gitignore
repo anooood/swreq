@@ -1,0 +1,8 @@
+P3_MCP_Application/
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+.idea/
+.vscode/
+.cursor/
