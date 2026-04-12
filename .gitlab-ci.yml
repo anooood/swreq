@@ -1,0 +1,44 @@
+stages:
+  - lint
+  - test
+  - build
+  - deploy
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip/
+
+lint:
+  stage: lint
+  image: python:3.11
+  script:
+    - pip install ruff
+    - ruff check src/
+
+test:development:
+  stage: test
+  image: python:3.11
+  script:
+    - pip install -r requirements.txt
+    - python -m pytest tests/development/ -v
+
+test:sit:
+  stage: test
+  script:
+    - python -m pytest tests/sit/ -v
+  when: manual
+
+test:uat:
+  stage: test
+  script:
+    - python -m pytest tests/uat/ -v
+  when: manual
+
+test:production:
+  stage: test
+  script:
+    - python -m pytest tests/production/ -v
+  when: manual

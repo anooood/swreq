@@ -1,0 +1,8 @@
+# Training / fine-tuning configuration (placeholder)
+training:
+  enabled: false
+  epochs: 3
+  batch_size: 4
+  learning_rate: 2.0e-4
+  lora_rank: 16
+  output_dir: artifacts/Experiments
