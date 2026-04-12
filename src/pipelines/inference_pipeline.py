@@ -27,6 +27,8 @@ from typing import Any
 import pandas as pd
 import requests
 
+from src.utils.reference_loader import verification_methods_block
+
 logger = logging.getLogger(__name__)
 
 CSV_FUNCTION_COL = "Function Name"
@@ -148,6 +150,7 @@ For EACH rewritten requirement output a JSON object with these keys:
   "name"                    : short noun-phrase title (max 5 words, no verbs)
   "description"             : the rewritten "shall" statement (apply rules R1-R7)
   "verification_method"     : one of [Analysis, Inspection, Test, Demonstration]
+                            Use the VERIFICATION METHODS REFERENCE below to select the correct method.
                                 Test          → exercised and measured at runtime
                                 Inspection    → verified by reviewing design or code
                                 Analysis      → verified by calculation or modelling
@@ -156,6 +159,8 @@ For EACH rewritten requirement output a JSON object with these keys:
 
 Respond ONLY with a JSON array of such objects.
 Do NOT include any text outside the JSON array.
+
+{verification_methods_context}
 
 Function name        : {function_name}
 Draft requirements   : {draft}
@@ -191,6 +196,7 @@ def rewrite_function(
     id_start: str,
     model: str,
     base_url: str,
+    vm_context: str = "",
 ) -> list[dict]:
     """
     Sends the full draft string to the LLM and returns a list of rewritten
@@ -202,6 +208,7 @@ def rewrite_function(
         function_name = group.function_name,
         draft         = group.draft,
         id_start      = id_start,
+        verification_methods_context = vm_context
     )
     try:
         raw    = _call_ollama(prompt, model, base_url)
@@ -231,6 +238,9 @@ def run_merge(groups: list[FunctionGroup], model: str, base_url: str) -> MergeRe
     One LLM call per FunctionGroup. The LLM returns 1+ rewritten requirements
     per function. Progress is printed to stdout.
     """
+    # Load verification methods context once for the whole run
+    vm_context = verification_methods_block()
+
     n_groups    = len(groups)
     hlrs: list[HighLevelRequirement] = []
     hlr_counter = 0
@@ -246,13 +256,13 @@ def run_merge(groups: list[FunctionGroup], model: str, base_url: str) -> MergeRe
         )
 
         id_start = f"#{hlr_counter + 1:03d}"
-        raw_list = rewrite_function(group, id_start, model, base_url)
+        raw_list = rewrite_function(group, id_start, model, base_url, vm_context=vm_context)
 
         for raw in raw_list:
             hlr_counter += 1
             notes = raw.get("compliance_notes", "")
             hlrs.append(HighLevelRequirement(
-                id                      = f"HLR-{hlr_counter:03d}",
+                id                      = f"LLR-{hlr_counter:03d}",
                 function_name           = group.function_name,
                 name                    = str(raw.get("name", group.function_name)),
                 description             = str(raw.get("description", group.draft)),

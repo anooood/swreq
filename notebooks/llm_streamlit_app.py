@@ -265,10 +265,10 @@ with tab1:
                 if i not in st.session_state["requirements"]:
                     start_time = time.time()
 
-                    orig_src   = fn["content"]
-                    func_node  = extractor.function_defs.get(fn["name"])
-                    emb_src    = generator_ast.visit(func_node)
-                    mapping    = get_identifier_mapping(orig_src, emb_src)
+                    orig_src  = fn["content"]
+                    func_node = extractor.function_defs.get(fn["name"])
+                    emb_src   = generator_ast.visit(func_node)
+                    mapping   = get_identifier_mapping(orig_src, emb_src)
 
                     name_prompt = name_prompt_template.format(
                         header_comments=st.session_state["cleaned_headers"],
@@ -277,9 +277,10 @@ with tab1:
                     reqs_prompt = reqs_prompt_template.format(
                         C_FUNCTION=fn["content"],
                         GLOBAL_VARIABLES=mapping,
-                        header_comments = st.session_state["cleaned_headers"]
+                        header_comments=st.session_state["cleaned_headers"],
                     )
 
+                    # ── Pass 1: Generate raw requirements from C code ──────────
                     response = requests.post(
                         f"{API_URL}/generate",
                         json={"prompts": [name_prompt, reqs_prompt]},
@@ -293,66 +294,95 @@ with tab1:
                     data      = response.json()
                     fixed_req = data["requirements"][1]
 
+                    # Substitute global variable names with their resolved values
                     for k, v in mapping.items():
                         cleaned_v = re.sub(r"\s*\([^)]*\)", "", v)
                         fixed_req = fixed_req.replace(k, cleaned_v)
 
-                    # --- Leaked syntax detection ---
-                    # ctx = function_context[fn["name"]]
-                    # leaked = []
-                    # for var in ctx["globals_used"] + ctx["locals_declared"]:
-                    #     if var not in modules_names and var in fixed_req:
-                    #         leaked.append(var)
-                    # for func in ctx["functions_called"]:
-                    #     if func in fixed_req:
-                    #         leaked.append(func)
-                    # for struct in ctx["used_structures"]:
-                    #     if struct not in modules_names and struct in fixed_req:
-                    #         leaked.append(struct)
-                    # if fn["name"] in fixed_req:
-                    #     leaked.append(fn["name"])
+                    # ── Leak detection ────────────────────────────────────────
+                    # Collect any C identifiers (variable names, function names,
+                    # struct names, the function's own name) that leaked through
+                    # into the requirements text despite the prompt instructions.
+                    ctx = function_context[fn["name"]]
+                    leaked = []
+                    for var in ctx["globals_used"] + ctx["locals_declared"]:
+                        if var not in modules_names and var in fixed_req:
+                            leaked.append(var)
+                    for func in ctx["functions_called"]:
+                        if func in fixed_req:
+                            leaked.append(func)
+                    for struct in ctx["used_structures"]:
+                        if struct not in modules_names and struct in fixed_req:
+                            leaked.append(struct)
+                    if fn["name"] in fixed_req:
+                        leaked.append(fn["name"])
+                    leaked = list(dict.fromkeys(leaked))  # deduplicate, preserve order
 
-                    # if leaked:
-                    #     post_prompt = identifier_rewrite_prompt.format(
-                    #         REQUIREMENTS=fixed_req,
-                    #         VARIABLES=leaked,
-                    #     )
-                    #     r2   = requests.post(
-                    #         f"{API_URL}/generate",
-                    #         json={"prompts": ["N/A", post_prompt]},
-                    #         timeout=300,
-                    #     )
-                    #     d2   = r2.json()
-                    #     repl = asast.literal_eval(d2["requirements"][1])
-                    #     vmap = dict(zip(leaked, repl))
-                    #     final_req = remove_consecutive_duplicates(
-                    #         replace_exact_identifiers(fixed_req, vmap)
-                    #     )
-                    # else:
-                    #     final_req = fixed_req
-
+                    # ── Pass 2: Clean up leaked identifiers ───────────────────
+                    # Ask the LLM to translate each leaked identifier into a
+                    # plain-English conceptual phrase, then substitute in-place.
+                    # This is the pass that was previously commented out.
+                    # The original code broke because it used ast.literal_eval()
+                    # on raw LLM output, which fails whenever the model doesn't
+                    # return a perfectly-formed Python list literal.
+                    # Fix: parse the response line-by-line instead.
                     final_req = fixed_req
+                    if leaked:
+                        post_prompt = identifier_rewrite_prompt.format(
+                            REQUIREMENTS=fixed_req,
+                            VARIABLES=leaked,
+                        )
+                        r2 = requests.post(
+                            f"{API_URL}/generate",
+                            json={"prompts": ["N/A", post_prompt]},
+                            timeout=300,
+                        )
+                        if r2.status_code == 200:
+                            raw_replacements = r2.json().get("requirements", ["", ""])[1]
+
+                            # Parse line-by-line instead of ast.literal_eval —
+                            # robust against any LLM formatting variation.
+                            replacement_lines = [
+                                ln.strip().strip("-•").strip().strip('"').strip("'")
+                                for ln in raw_replacements.splitlines()
+                                if ln.strip() and not ln.strip().startswith("[")
+                                   and not ln.strip().startswith("CONCEPTUAL")
+                                   and not ln.strip().startswith("OUTPUT")
+                            ]
+
+                            # Only apply if we got the right number of replacements
+                            if len(replacement_lines) == len(leaked):
+                                vmap = dict(zip(leaked, replacement_lines))
+                                final_req = remove_consecutive_duplicates(
+                                    replace_exact_identifiers(fixed_req, vmap)
+                                )
+                            else:
+                                # Mismatch in count: fall back to fixed_req
+                                # (better than a corrupt substitution)
+                                final_req = fixed_req
+
+                    # ── Metrics tracking ──────────────────────────────────────
                     elapsed = time.time() - start_time
                     st.session_state["inference_times"].append(elapsed)
 
-                    # Track quality metrics
-                    # for var in ctx["globals_used"] + ctx["locals_declared"]:
-                    #     if var not in modules_names and var in final_req:
-                    #         st.session_state["variables_leaked_all"].append(var)
+                    for var in ctx["globals_used"] + ctx["locals_declared"]:
+                        if var not in modules_names and var in final_req:
+                            st.session_state["variables_leaked_all"].append(var)
+
                     for k, v in mapping.items():
                         cleaned_v = re.sub(r"\s*\([^)]*\)", "", v).replace(")", "").strip()
                         if cleaned_v not in final_req:
                             st.session_state["globals_missing_all"].append(cleaned_v)
 
                     st.session_state["requirements"][i] = {
-                        "Function":            strip_markdown(data["requirements"][0]),
-                        "Requirements":        final_req.strip(),
+                        "Function":             strip_markdown(data["requirements"][0]),
+                        "Requirements":         final_req.strip(),
                         "ModelResponseTimeSec": elapsed,
-                        "Applied":             False,
-                        "Globals":             mapping,
+                        "Applied":              False,
+                        "Globals":              mapping,
                     }
 
-                # Render editable form
+                # ── Render editable form ──────────────────────────────────────
                 req = st.session_state["requirements"][i]
                 col_req, col_code = placeholder.columns([1, 1])
 

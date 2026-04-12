@@ -16,6 +16,21 @@ GET  /models          — list models available in Ollama
 GET  /config          — show active model config
 POST /generate        — two-prompt LLR generation call (Stage 1: code → LLR)
 POST /rewrite         — rewrite LLRs into Jama-compliant HLRs (Stage 2)
+
+Determinism note
+----------------
+Qwen3 models (e.g. qwen3-coder:30b) are hybrid thinking/non-thinking models.
+They emit internal <think>…</think> reasoning tokens whose content is NOT
+controlled by temperature=0 / seed=42, making outputs non-deterministic across
+calls even with greedy settings.
+
+To disable the thinking pass and achieve true greedy determinism:
+  1. Append ":no-thinking" to the model tag in model.yaml  (Ollama ≥ 0.6.5)
+     OR keep the base tag and use the "think": false option below (preferred —
+     no need to pull a separate model variant).
+  2. The "think": false option is passed in OLLAMA_OPTIONS_S1 below.
+
+Stage 2 uses qwen2.5 which has no thinking mode — no change needed there.
 """
 
 from __future__ import annotations
@@ -54,24 +69,47 @@ OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", _cfg["ollama"]["base_url"])
 STAGE1_MODEL:    str = os.getenv("STAGE1_MODEL",    _cfg["stage1"]["model"])
 STAGE2_MODEL:    str = os.getenv("STAGE2_MODEL",    _cfg["stage2"]["model"])
 
-# Generation options — mirrored from the original transformers GEN_CONFIG.
-# num_predict  : Ollama's equivalent of max_new_tokens — set high to avoid output truncation.
-# repeat_penalty: Ollama's equivalent of repetition_penalty.
-# num_ctx      : CRITICAL — Ollama defaults to 2048 tokens total context window.
-#                Mistral-7B supports up to 32768. Setting this high ensures long
-#                C functions + globals in the prompt are never silently truncated
-#                before generation even begins.
+# ---------------------------------------------------------------------------
+# Generation options
+# ---------------------------------------------------------------------------
+
+# Stage 1 — C code → LLR
+#
+# KEY DETERMINISM SETTINGS for Qwen3 (qwen3-coder:30b and any qwen3-* model):
+#
+#   "think": false
+#       Disables Qwen3's internal chain-of-thought reasoning pass.
+#       Without this, Qwen3 runs a non-deterministic thinking phase before
+#       producing visible output, causing different requirements to be generated
+#       on each run even when temperature=0 and seed=42 are set.
+#       Ollama exposes this as a first-class option (requires Ollama ≥ 0.6.5).
+#
+#   "temperature": 0.0 + "seed": 42 + "top_k": 1
+#       Standard greedy decoding — eliminates all sampling randomness in the
+#       visible (non-thinking) generation pass.
+#
+#   "num_ctx": 16384
+#       Must be set explicitly. Ollama defaults to 2048 tokens total context
+#       window, which silently truncates large C functions before generation
+#       even begins, producing different truncation points across runs.
+#       Mistral-7B and Qwen3-30B both support up to 32768.
+#
+# Non-Qwen3 fallback: if your stage1.model is not a Qwen3 model, "think": false
+# is silently ignored by Ollama, so these options are safe for any model.
 OLLAMA_OPTIONS_S1 = {
-    "temperature":    0.0,    # greedy decoding (do_sample=False)
+    "temperature":    0.0,    # greedy decoding
     "seed":           42,
     "top_p":          1.0,
     "top_k":          1,
     "num_predict":    4096,   # max output tokens
     "repeat_penalty": 1.1,
     "num_ctx":        16384,  # prompt + output window — fits large C functions
+    "think":          False,  # disable Qwen3 thinking pass (no-op for other models)
 }
 
-# Stage 2 prompts are much shorter (just LLR text), so a smaller context is fine.
+# Stage 2 — LLR → Jama HLR
+# Prompts are much shorter (just LLR text), so a smaller context is fine.
+# Stage 2 uses qwen2.5 which has no thinking mode — "think" key not needed.
 OLLAMA_OPTIONS_S2 = {
     "temperature":    0.0,
     "seed":           42,
@@ -163,11 +201,12 @@ def health():
         resp.raise_for_status()
         models = [m["name"] for m in resp.json().get("models", [])]
         return {
-            "status":          "ok",
-            "ollama":          OLLAMA_BASE_URL,
+            "status":           "ok",
+            "ollama":           OLLAMA_BASE_URL,
             "available_models": models,
-            "stage1_model":    STAGE1_MODEL,
-            "stage2_model":    STAGE2_MODEL,
+            "stage1_model":     STAGE1_MODEL,
+            "stage2_model":     STAGE2_MODEL,
+            "stage1_thinking":  False,   # always disabled — see OLLAMA_OPTIONS_S1
         }
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Ollama unreachable: {exc}")
@@ -188,9 +227,11 @@ def list_models():
 def get_config():
     """Show the active model configuration."""
     return {
-        "ollama_base_url": OLLAMA_BASE_URL,
-        "stage1_model":    STAGE1_MODEL,
-        "stage2_model":    STAGE2_MODEL,
+        "ollama_base_url":  OLLAMA_BASE_URL,
+        "stage1_model":     STAGE1_MODEL,
+        "stage2_model":     STAGE2_MODEL,
+        "stage1_options":   OLLAMA_OPTIONS_S1,
+        "stage2_options":   OLLAMA_OPTIONS_S2,
     }
 
 
@@ -200,6 +241,9 @@ def generate(req: GenerateRequest):
     Stage 1: C code → LLR.
     Uses STAGE1_MODEL (set in configs/model.yaml).
     Accepts [heading_prompt, body_prompt]; returns [heading, body].
+
+    Qwen3 thinking is disabled via OLLAMA_OPTIONS_S1["think"] = False,
+    ensuring identical output on every call for the same input.
     """
     if len(req.prompts) < 2:
         raise HTTPException(status_code=422, detail="Expected exactly 2 prompts.")
