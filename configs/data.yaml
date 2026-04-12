@@ -1,0 +1,6 @@
+# Data configuration
+data:
+  input_dir: data/P3_MCP_Application/cmake-src/src
+  parsed_dir: data/C_Parsed
+  output_dir: artifacts/Experiments
+  supported_extensions: [".c", ".h", ".i"]

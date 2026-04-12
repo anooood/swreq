@@ -1,0 +1,64 @@
+Function Name,Requirements
+IMU Initialization State,"1. The system shall configure auxiliary controls to enable auxiliary function and disable CSV output, RX auxiliary function, RX detail auxiliary function, and error detection function when the data file is not valid.
+2. The system shall format and append a message to the auxiliary string indicating that the SDLC protocol has been initialized, including a timestamp value obtained from the system's microsecond timer.
+3. The system shall initialize the SDLC module using the specified address 0x41800000 and assign the IMU interrupt handler function to manage communication events."
+Interrupt Handler For Imu Communication,"1. The inertial measurement unit shall record a system timestamp upon receiving an interrupt.
+2. The inertial measurement unit shall validate the received data by checking the status for a CRC error condition.
+3. The inertial measurement unit shall validate the received data address against the expected IMU address 0x0A.
+4. The inertial measurement unit shall validate the received message ID against the first message ID 0x01 and the data length against the size of the first message structure.
+5. The inertial measurement unit shall increment the error counter when a sequence number error is detected for the first message type.
+6. The inertial measurement unit shall output a formatted string indicating a sequence number error for the first message type, including the system time and the message ID 0x01.
+7. The inertial measurement unit shall copy the raw data from the first message into the internal data buffer.
+8. The inertial measurement unit shall compute the angular rate for the X-axis by multiplying the raw value with the scaling factor 0.00457763671875 and negate the result.
+9. The inertial measurement unit shall compute the angular rate for the Z-axis by multiplying the raw value with the scaling factor 0.0011444091796875.
+10. The inertial measurement unit shall compute the angular rate for the Y-axis by multiplying the raw value with the scaling factor 0.0011444091796875.
+11. The inertial measurement unit shall compute the acceleration for the X-axis by multiplying the raw value with the scaling factor 0.02232421875 and negate the result.
+12. The inertial measurement unit shall compute the acceleration for the Z-axis by multiplying the raw value with the scaling factor 0.02232421875.
+13. The inertial measurement unit shall compute the acceleration for the Y-axis by multiplying the raw value with the scaling factor 0.02232421875.
+14. The inertial measurement unit shall mark the data as valid.
+15. The inertial measurement unit shall increment the cycle counter.
+16. The inertial measurement unit shall reset the cycle counter to zero when it reaches a value of 6.
+17. The inertial measurement unit shall record the timestamp of the last received message.
+18. The inertial measurement unit shall output a formatted string indicating the reception of the first message type, including the system time and the message ID 0x01.
+19. The inertial measurement unit shall output detailed angular rate and acceleration data for the first message type if detailed output is enabled.
+20. The inertial measurement unit shall validate the received message ID against the second message ID 0x02 and the data length against the size of the second message structure.
+21. The inertial measurement unit shall increment the error counter when a sequence number error is detected for the second message type.
+22. The inertial measurement unit shall output a formatted string indicating a sequence number error for the second message type, including the system time and the message ID 0x02.
+23. The inertial measurement unit shall copy the raw data from the second message into the internal data buffer.
+24. The inertial measurement unit shall compute the angular rate for the X-axis by multiplying the raw value with the scaling factor 0.00457763671875 and negate the result.
+25. The inertial measurement unit shall compute the angular rate for the Z-axis by multiplying the raw value with the scaling factor 0.0011444091796875.
+26. The inertial measurement unit shall compute the angular rate for the Y-axis by multiplying the raw value with the scaling factor 0.0011444091796875.
+27. The inertial measurement unit shall compute the acceleration for the X-axis by multiplying the raw value with the scaling factor 0.02232421875 and negate the result.
+28. The inertial measurement unit shall compute the acceleration for the Z-axis by multiplying the raw value with the scaling factor 0.02232421875.
+29. The inertial measurement unit shall compute the acceleration for the Y-axis by multiplying the raw value with the scaling factor 0.02232421875.
+30. The inertial measurement unit shall compute the delta angle for the X-axis by multiplying the raw value with the scaling factor (1.0 / 1073741824).
+31. The inertial measurement unit shall compute the delta angle for the Z-axis by multiplying the raw value with the scaling factor (1.0 / 4294967296).
+32. The inertial measurement unit shall compute the delta angle for the Y-axis by multiplying the raw value with the scaling factor (1.0 / 4294967296).
+33. The inertial measurement unit shall compute the delta velocity for the X-axis by multiplying the raw value with the scaling factor (0.3048 / 67108864).
+34. The inertial measurement unit shall compute the delta velocity for the Z-axis by multiplying the raw value with the scaling factor (0.3048 / 67108864).
+35. The inertial measurement unit shall compute the delta velocity for the Y-axis by multiplying the raw value with the scaling factor (0.3048 / 67108864).
+36. The inertial measurement unit shall mark the data as valid.
+37. The inertial measurement unit shall reset the cycle counter to zero.
+38. The inertial measurement unit shall record the timestamp of the last received message.
+39. The inertial measurement unit shall output a formatted string containing comma-separated data for the second message type if CSV output is enabled.
+40. The inertial measurement unit shall output a formatted string indicating the reception of the second message type, including the system time and the message ID 0x02.
+41. The inertial measurement unit shall output detailed angular rate, acceleration, delta angle, and delta velocity data for the second message type if detailed output is enabled.
+42. The inertial measurement unit shall increment the error counter when an invalid message ID is received.
+43. The inertial measurement unit shall output a formatted string indicating an invalid message ID, including the system time and the received message ID.
+44. The inertial measurement unit shall increment the error counter when an invalid address is received.
+45. The inertial measurement unit shall output a formatted string indicating an invalid address, including the system time.
+46. The inertial measurement unit shall increment the error counter when a CRC error is detected.
+47. The inertial measurement unit shall output a formatted string indicating a CRC error, including the system time.
+48. The inertial measurement unit shall increment the total received message counter.
+49. The system shall schedule the task600HZ task for execution."
+IMU Communication Status Check,"1. The system shall disable interrupts when checking communication status.
+2. The system shall evaluate whether the elapsed time since the timestamp has reached or exceeded 2100 units.
+3. The system shall update the timestamp with the current system time when the elapsed time meets or exceeds 2100 units.
+4. The system shall set the data validity indicator to zero when the elapsed time meets or exceeds 2100 units.
+5. The system shall increment the error count by one when the elapsed time meets or exceeds 2100 units.
+6. The system shall increment the cycle counter by one when the elapsed time meets or exceeds 2100 units.
+7. The system shall output a message indicating invalid IMU data when the error detection is enabled and the elapsed time meets or exceeds 2100 units.
+8. The system shall format and display the current time in microseconds followed by the text "":IMU Data Invalid "" when the error detection is enabled and the elapsed time meets or exceeds 2100 units.
+9. The system shall reset the cycle counter to zero when the cycle counter reaches or exceeds 6.
+10. The system shall add the 600 Hertz task to the task manager when the elapsed time meets or exceeds 2100 units.
+11. The system shall enable interrupts after checking communication status."
