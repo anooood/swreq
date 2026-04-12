@@ -40,6 +40,10 @@ artifacts/Experiments/**/*.pt
 artifacts/Experiments/**/*.bin
 artifacts/*.xslx
 artifacts/*.csv
+ 
+# Generated output files
+*.csv
+*.xlsx
 
 # Logs
 logs/
