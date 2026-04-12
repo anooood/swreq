@@ -1,5 +1,5 @@
 # Model configuration
-# These are the hardcoded models used by each stage of the pipeline.
+# These are the models used by each stage of the pipeline.
 # To change a model, edit here and restart the application.
 
 ollama:
@@ -7,10 +7,31 @@ ollama:
 
 # Stage 1 — C code → Low-Level Requirements (LLR)
 # Needs strong instruction-following and code comprehension.
+#
+# IMPORTANT — Qwen3 determinism:
+# qwen3-coder:30b (and all qwen3-* models) are hybrid thinking/non-thinking
+# models. Their internal chain-of-thought reasoning pass is non-deterministic
+# and is NOT suppressed by temperature=0 or seed=42 alone. This causes
+# Stage 1 to produce different requirements on each run for the same input.
+#
+# The fix is applied in api/app.py via OLLAMA_OPTIONS_S1["think"] = False,
+# which disables the thinking pass entirely (requires Ollama >= 0.6.5).
+#
+# Alternative: replace the model tag with the no-thinking variant if you
+# want to enforce this at the model level instead:
+#   model: qwen3-coder:30b-q4_K_M   (standard — thinking disabled by app.py)
+#   model: hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4_K_M  (if :no-thinking tag is available)
 stage1:
-  model: qwen3-coder:30b 
+  model: qwen3-coder:30b
 
-# Stage 2 — LLR → Jama-compliant High-Level Requirements (HLR)
-# Needs strong formal writing and JSON output reliability.
+# Stage 2 — LLR → Jama-compliant Low-Level Requirements
+# Needs strong formal writing and reliable JSON output.
+# qwen2.5 has no thinking mode — fully deterministic with temperature=0.
 stage2:
+  model: qwen2.5:latest
+
+# Stage 3 — Jama LLR → Jama HLR  (hlr_pipeline.py / main.py --stage 3)
+# Same requirements as Stage 2. Reuses stage2 model by default.
+# Override by adding a stage3.model entry and updating hlr_pipeline.py if needed.
+stage3:
   model: qwen2.5:latest
