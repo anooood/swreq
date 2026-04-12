@@ -34,10 +34,12 @@ env/
 models/
 
 # Data & outputs (avoid committing large files)
-data/P3_MCP_Application
+data/P3_MCP_Application/
 data/C_Parsed/
 artifacts/Experiments/**/*.pt
 artifacts/Experiments/**/*.bin
+artifacts/*.xslx
+artifacts/*.csv
 
 # Logs
 logs/
