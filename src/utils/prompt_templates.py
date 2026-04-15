@@ -62,11 +62,33 @@ If HEADER COMMENTS is empty, skip this step and proceed with the function name a
 
 ────────────────────────────
 STEP 1 — Line Iteration
-- Iterate through the C function **line by line from top to bottom**.
-- Do NOT skip or merge any line (STRICT).
+Iterate through the C function **line by line from top to bottom**.
+Do NOT skip or merge any line at this stage (STRICT).
 
 ────────────────────────────
-STEP 2 — Global Value Resolution
+STEP 2 — Trivial Line Filter  ← MANDATORY GATE
+Before doing anything else with the current line, decide: is this line trivial?
+
+A line is trivial if it ONLY does one of the following:
+  - Calls sprintf, snprintf, or any string-formatting function
+  - Reads or writes any variable named AuxStr (in any form: AuxStr, auxstr, AUXSTR, etc.)
+  - Calls printf, fprintf, syslog, or any logging/debug macro
+  - Sets or clears a flag to a fixed value (e.g. flag = 0, is_ready = TRUE)
+  - Increments or decrements a counter (e.g. count++, retry -= 1)
+  - Clears or zeroes a buffer or struct (e.g. memset, = {{0}})
+  - Initialises a local scratch variable with no externally observable effect
+
+If the line is trivial → **produce NOTHING. No requirement, no comment, no placeholder. Absolute silence.**
+If the line is NOT trivial → proceed to STEP 3.
+
+Examples of trivial lines that MUST produce no output:
+  sprintf(AuxStr, "Temp: %d", val);       → nothing
+  memset(AuxStr, 0, sizeof(AuxStr));      → nothing
+  error_flag = 0;                         → nothing
+  retry_count++;                          → nothing
+
+────────────────────────────
+STEP 3 — Global Value Resolution
 For the current line:
 - Identify all global variables referenced on that line.
 - Replace each global variable with its numerical value using the provided GLOBAL VARIABLES (value mapping) dictionary.
@@ -74,18 +96,18 @@ For the current line:
 - Hexadecimal values MUST be preserved exactly and SHALL NOT be converted.
 
 ────────────────────────────
-STEP 3 — Numeric Extraction (STRICT)
+STEP 4 — Numeric Extraction (STRICT)
 For the current line:
 - Identify ALL numerical values:
   - Inline numeric literals
-  - Resolved global variable values 
+  - Resolved global variable values
 - Every identified numerical value **MUST appear explicitly in the requirement**.
 
 ────────────────────────────
-STEP 4 — Requirement Writing
+STEP 5 — Requirement Writing
 For the current line, write ONE software requirement that:
 - Uses a **shall** statement
-- Contains numeric values that were extracted in STEP 3 (STRICT)
+- Contains numeric values that were extracted in STEP 4 (STRICT)
 - Does **not** mention any code identifiers or fragments/substrings of them (case-insensitive).
 - Avoids all code patterns: `.`, `->`, `::`, `[]`, `()`, snake_case, camelCase, PascalCase, or UPPER_SNAKE.
 - Replaces identifiers with conceptual phrases informed by the header context
@@ -104,15 +126,16 @@ OUTPUT FORMAT
 - Numbered list (1., 2., 3., …)
 - Separate distinct requirement branches into newlines.
 - One sentence per requirement
-- One requirement per source line
+- One requirement per non-trivial source line
 - No explanations, comments, or extra text
 
 ────────────────────────────
 FINAL VERIFICATION (MANDATORY)
 Before producing the final output, verify that:
-- Each code line produced exactly one requirement.
+- Trivial lines (per STEP 2) produced NO output whatsoever — not even a placeholder.
+- Each non-trivial line produced exactly one requirement.
 - All global variables were replaced with their **numerical values** and are mentioned in the requirements (STRICT).
-- All numerical values extracted in STEP 3 appear in the requirements along with their units, if applicable (e.g. hexadecimal, milliseconds..) (STRICT)
+- All numerical values extracted in STEP 4 appear in the requirements along with their units, if applicable (e.g. hexadecimal, milliseconds..) (STRICT)
 - All requirements are written as **shall** statements
 - No code syntax, variable names, or identifiers appear anywhere in the output. REWRITE CONCEPTUALLY.
 - Domain terms from the header comments are used where they sharpen meaning.

@@ -14,13 +14,9 @@ ollama:
 # and is NOT suppressed by temperature=0 or seed=42 alone. This causes
 # Stage 1 to produce different requirements on each run for the same input.
 #
-# The fix is applied in api/app.py via OLLAMA_OPTIONS_S1["think"] = False,
-# which disables the thinking pass entirely (requires Ollama >= 0.6.5).
-#
-# Alternative: replace the model tag with the no-thinking variant if you
-# want to enforce this at the model level instead:
-#   model: qwen3-coder:30b-q4_K_M   (standard — thinking disabled by app.py)
-#   model: hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4_K_M  (if :no-thinking tag is available)
+# The fix is applied in api/app.py: think=False is sent as a TOP-LEVEL
+# parameter in the Ollama API request (not inside "options", where it would
+# be silently ignored). This disables the thinking pass entirely.
 stage1:
   model: qwen3-coder:30b
 
