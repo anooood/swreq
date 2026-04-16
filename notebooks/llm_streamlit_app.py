@@ -81,10 +81,8 @@ try:
 except Exception:
     _active_cfg  = {}
 
-STAGE1_MODEL = _active_cfg.get("stage1_model", "mistral:7b")
-STAGE2_MODEL = _active_cfg.get("stage2_model", "mistral:7b")
-STAGE3_MODEL = _active_cfg.get("stage3_model", "qwen2.5:latest")
-
+STAGE1_MODEL = _active_cfg.get("stage1_model", "qwen3-coder:30b")
+STAGE2_MODEL = _active_cfg.get("stage2_model", "qwen2.5:latest")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -183,9 +181,9 @@ for _key, _default in [
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.title("🔧 Software Requirements Generator")
-st.caption("Stage 1: C code → LLR  |  Stage 2: LLR → Jama LLR  |  Stage 3: Jama LLR → HLR")
+st.caption("Stage 1: C code → LLR  |  Stage 2: LLR → Jama LLR")
 
-tab1, tab2, tab3 = st.tabs(["📄 Stage 1 — Code → LLR", "📋 Stage 2 — LLR → Jama LLR", "🔗 Stage 3 — Jama LLR → HLR"])
+tab1, tab2 = st.tabs(["📄 Stage 1 — Code → LLR", "📋 Stage 2 — LLR → Jama LLR"])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -658,201 +656,7 @@ with tab2:
                     file_name=csv_path.name,
                     mime="text/csv",
                 )
-
-        st.info("➡ Use the **Stage 3** tab to merge these Jama LLRs into High-Level Requirements.")
     elif groups_df is not None:
         st.info("Click **Generate Jama LLRs** to start Stage 2.")
     else:
         st.info("Provide LLR input above to begin.")
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  STAGE 3 — Jama LLR → HLR
-# ═════════════════════════════════════════════════════════════════════════════
-
-with tab3:
-    st.header("Stage 3: Jama LLR → High-Level Requirements")
-    st.markdown(
-        "Upload a Jama LLR CSV (columns: `Function Name`, `Requirements`) "
-        "or use the output from Stage 2. The LLM merges related low-level "
-        "requirements into fewer **high-level requirements**, preserving all "
-        "numerical values."
-    )
-
-    st.caption(f"Model: `{STAGE3_MODEL}` — configured in `configs/model.yaml`")
-    st.divider()
-
-    # Input source selector
-    hlr_input_source = st.radio(
-        "Jama LLR input source",
-        ["Use Stage 2 output (current session)", "Upload Jama LLR CSV file"],
-        horizontal=True,
-        key="hlr_input_source",
-    )
-
-    hlr_groups_df: pd.DataFrame | None = None
-
-    if hlr_input_source == "Use Stage 2 output (current session)":
-        if st.session_state.get("jama_result") and st.session_state["jama_result"].hlrs:
-            result_s2 = st.session_state["jama_result"]
-            rows = [
-                {"Function Name": h.function_name, "Requirements": h.description}
-                for h in result_s2.hlrs
-            ]
-            hlr_groups_df = pd.DataFrame(rows)
-            st.success(f"{len(hlr_groups_df)} Jama LLR(s) loaded from Stage 2.")
-            st.dataframe(hlr_groups_df, use_container_width=True)
-        else:
-            st.warning("No Stage 2 output yet — run Stage 2 first, or upload a CSV.")
-
-    else:
-        hlr_uploaded = st.file_uploader("Upload Jama LLR CSV", type=["csv"], key="hlr_csv_upload")
-        if hlr_uploaded:
-            hlr_groups_df = pd.read_csv(hlr_uploaded, dtype=str).fillna("")
-            missing = [c for c in ("Function Name", "Requirements") if c not in hlr_groups_df.columns]
-            if missing:
-                # Also try "Description" column (Jama CSV export format)
-                if "Description" in hlr_groups_df.columns and "Requirements" not in hlr_groups_df.columns:
-                    hlr_groups_df = hlr_groups_df.rename(columns={"Description": "Requirements"})
-                    missing = [c for c in ("Function Name", "Requirements") if c not in hlr_groups_df.columns]
-                if missing:
-                    st.error(f"CSV is missing columns: {missing}")
-                    hlr_groups_df = None
-            if hlr_groups_df is not None:
-                st.success(f"{len(hlr_groups_df)} row(s) loaded.")
-                st.dataframe(hlr_groups_df, use_container_width=True)
-
-    # Run Stage 3
-    if hlr_groups_df is not None and st.button("▶ Generate HLRs", type="primary", key="run_stage3"):
-        from src.pipelines.hlr_pipeline import (
-            FunctionGroup as HLRFunctionGroup,
-            MergeResult as HLRMergeResult,
-            HighLevelRequirement as HLR,
-        )
-
-        # Build FunctionGroup list — concatenate LLRs per function
-        hlr_groups: dict[str, list[str]] = {}
-        for _, row in hlr_groups_df.iterrows():
-            fn  = str(row["Function Name"]).strip()
-            req = str(row["Requirements"]).strip()
-            if fn and req:
-                hlr_groups.setdefault(fn, []).append(req)
-
-        hlr_function_groups = [
-            HLRFunctionGroup(function_name=fn, draft=" ".join(parts))
-            for fn, parts in hlr_groups.items()
-        ]
-
-        hlr_progress = st.progress(0)
-        hlr_status   = st.empty()
-        hlrs_all: list[HLR] = []
-        hlr_counter = 0
-
-        for idx, group in enumerate(hlr_function_groups):
-            hlr_status.info(f"Synthesising HLRs [{idx+1}/{len(hlr_function_groups)}]: **{group.function_name}**…")
-
-            resp = requests.post(
-                f"{API_URL}/synthesize_hlr",
-                json={
-                    "function_name": group.function_name,
-                    "draft":         group.draft,
-                },
-                timeout=300,
-            )
-
-            if resp.status_code != 200:
-                st.warning(f"HLR synthesis failed for {group.function_name}: {resp.text}")
-                continue
-
-            raw_list = resp.json().get("requirements", [])
-            for raw in raw_list:
-                hlr_counter += 1
-                hlrs_all.append(HLR(
-                    id                  = f"HLR-{hlr_counter:03d}",
-                    function_name       = group.function_name,
-                    name                = str(raw.get("name", group.function_name)),
-                    description         = str(raw.get("description", group.draft)),
-                    verification_method = str(raw.get("verification_method", "Analysis")),
-                    requirement_type    = str(raw.get("requirement_type", "Functional")),
-                ))
-
-            hlr_progress.progress((idx + 1) / len(hlr_function_groups))
-
-        hlr_status.success(f"✅ {len(hlrs_all)} HLR(s) synthesised from {len(hlr_function_groups)} function(s).")
-
-        hlr_result = HLRMergeResult(
-            hlrs           = hlrs_all,
-            function_count = len(hlr_function_groups),
-            llr_count      = len(hlr_groups_df),
-            _groups        = hlr_function_groups,
-        )
-        st.session_state["hlr_result"] = hlr_result
-
-    # ── Display + Export Stage 3 ──────────────────────────────────────────────
-
-    if st.session_state.get("hlr_result"):
-        hlr_result = st.session_state["hlr_result"]
-        st.subheader(f"Generated HLRs ({len(hlr_result.hlrs)} total)")
-
-        # Preview table
-        hlr_preview = [
-            {
-                "ID":                  h.id,
-                "Function":            h.function_name,
-                "Name":                h.name,
-                "Description":         h.description[:120] + ("…" if len(h.description) > 120 else ""),
-                "Verification":        h.verification_method,
-                "Type":                h.requirement_type,
-            }
-            for h in hlr_result.hlrs
-        ]
-        st.dataframe(pd.DataFrame(hlr_preview), use_container_width=True)
-
-        st.subheader("📤 Export Stage 3 Outputs")
-        col_hlr_xlsx, col_hlr_csv = st.columns(2)
-
-        with col_hlr_xlsx:
-            if st.button("📊 Save Jama HLR Excel (.xlsx)", key="save_hlr_xlsx"):
-                from src.pipelines.exporter import export_to_excel
-
-                stem      = hlr_groups_df["Function Name"].iloc[0].split()[0] if hlr_groups_df is not None else "output"
-                xlsx_path = _artifacts_path(f"{stem}_Jama_HLR.xlsx")
-                export_to_excel(hlr_result, str(xlsx_path), filename=stem)
-                st.success(f"Saved → `{xlsx_path}`")
-                st.download_button(
-                    label="⬇ Download Jama HLR Excel",
-                    data=xlsx_path.read_bytes(),
-                    file_name=xlsx_path.name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_hlr_xlsx",
-                )
-
-        with col_hlr_csv:
-            if st.button("📄 Save Jama HLR CSV", key="save_hlr_csv"):
-                stem     = hlr_groups_df["Function Name"].iloc[0].split()[0] if hlr_groups_df is not None else "output"
-                csv_path = _artifacts_path(f"{stem}_Jama_HLR.csv")
-
-                rows = [
-                    {
-                        "ID":                  h.id,
-                        "Function Name":       h.function_name,
-                        "Name":                h.name,
-                        "Description":         h.description,
-                        "Verification Method": h.verification_method,
-                        "Requirement Type":    h.requirement_type,
-                    }
-                    for h in hlr_result.hlrs
-                ]
-                pd.DataFrame(rows).to_csv(csv_path, index=False)
-                st.success(f"Saved → `{csv_path}`")
-                st.download_button(
-                    label="⬇ Download Jama HLR CSV",
-                    data=csv_path.read_bytes(),
-                    file_name=csv_path.name,
-                    mime="text/csv",
-                    key="dl_hlr_csv",
-                )
-    elif hlr_groups_df is not None:
-        st.info("Click **Generate HLRs** to start Stage 3.")
-    else:
-        st.info("Provide Jama LLR input above to begin.")

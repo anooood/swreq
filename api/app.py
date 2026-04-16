@@ -66,7 +66,6 @@ _cfg = _load_model_config()
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", _cfg["ollama"]["base_url"])
 STAGE1_MODEL:    str = os.getenv("STAGE1_MODEL",    _cfg["stage1"]["model"])
 STAGE2_MODEL:    str = os.getenv("STAGE2_MODEL",    _cfg["stage2"]["model"])
-STAGE3_MODEL:    str = os.getenv("STAGE3_MODEL",    _cfg["stage3"]["model"])
 
 # ---------------------------------------------------------------------------
 # Generation options
@@ -112,18 +111,6 @@ OLLAMA_OPTIONS_S1 = {
 # Prompts are much shorter (just LLR text), so a smaller context is fine.
 # Stage 2 uses qwen2.5 which has no thinking mode — "think" key not needed.
 OLLAMA_OPTIONS_S2 = {
-    "temperature":    0.0,
-    "seed":           42,
-    "top_p":          1.0,
-    "top_k":          1,
-    "num_predict":    4096,
-    "repeat_penalty": 1.1,
-    "num_ctx":        8192,
-}
-
-# Stage 3 — Jama LLR → HLR (merging related LLRs into high-level requirements)
-# Same context needs as Stage 2.
-OLLAMA_OPTIONS_S3 = {
     "temperature":    0.0,
     "seed":           42,
     "top_p":          1.0,
@@ -283,7 +270,6 @@ def health():
             "available_models": models,
             "stage1_model":     STAGE1_MODEL,
             "stage2_model":     STAGE2_MODEL,
-            "stage3_model":     STAGE3_MODEL,
             "stage1_thinking":  False,   # always disabled — think=False sent as top-level API param
         }
     except Exception as exc:
@@ -308,10 +294,8 @@ def get_config():
         "ollama_base_url":  OLLAMA_BASE_URL,
         "stage1_model":     STAGE1_MODEL,
         "stage2_model":     STAGE2_MODEL,
-        "stage3_model":     STAGE3_MODEL,
         "stage1_options":   OLLAMA_OPTIONS_S1,
         "stage2_options":   OLLAMA_OPTIONS_S2,
-        "stage3_options":   OLLAMA_OPTIONS_S3,
     }
 
 
@@ -385,70 +369,4 @@ def rewrite(req: RewriteRequest):
         function_name=req.function_name,
         requirements=results,
         model=STAGE2_MODEL,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Stage 3 — Jama LLR → HLR (merge related LLRs into high-level requirements)
-# ---------------------------------------------------------------------------
-
-class SynthesizeHLRRequest(BaseModel):
-    """Stage 3 — Jama LLR to HLR."""
-    function_name: str
-    draft:         str     # concatenated Jama LLR text for this function
-
-
-class SynthesizeHLRResponse(BaseModel):
-    function_name: str
-    requirements:  list
-    model:         str
-
-
-@app.post("/synthesize_hlr", response_model=SynthesizeHLRResponse)
-def synthesize_hlr(req: SynthesizeHLRRequest):
-    """
-    Stage 3: Jama LLR → HLR.
-    Uses STAGE3_MODEL (set in configs/model.yaml).
-
-    Merges related low-level requirements into fewer high-level requirements,
-    preserving all numerical values.
-    """
-    from src.pipelines.hlr_pipeline import (
-        FunctionGroup, get_hlr_prompt, _safe_json_parse,
-    )
-    from src.utils.reference_loader import verification_methods_block
-    import logging as _log
-
-    group      = FunctionGroup(function_name=req.function_name, draft=req.draft)
-    # vm_context = verification_methods_block()
-    prompt_tpl = get_hlr_prompt()
-
-    prompt = prompt_tpl.format(
-        # function_name               = group.function_name,
-        llrs_json                       = group.draft,
-        # verification_methods_context = vm_context,
-    )
-
-    try:
-        raw    = _ollama_generate(prompt, model=STAGE3_MODEL, options=OLLAMA_OPTIONS_S3)
-        result = _safe_json_parse(raw)
-        if not isinstance(result, list):
-            raise ValueError("LLM response is not a JSON array")
-        results = result
-    except Exception as exc:
-        _log.warning(
-            "HLR synthesis failed for '%s': %s — preserving original as fallback.",
-            group.function_name, exc,
-        )
-        results = [{
-            "name": group.function_name.replace("_", " ").title(),
-            "description": group.draft,
-            "verification_method": "Analysis",
-            "requirement_type": "Functional",
-        }]
-
-    return SynthesizeHLRResponse(
-        function_name=req.function_name,
-        requirements=results,
-        model=STAGE3_MODEL,
     )
