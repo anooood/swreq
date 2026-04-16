@@ -25,9 +25,3 @@ stage1:
 # qwen2.5 has no thinking mode — fully deterministic with temperature=0.
 stage2:
   model: qwen2.5:latest
-
-# Stage 3 — Jama LLR → Jama HLR  (hlr_pipeline.py / main.py --stage 3)
-# Same requirements as Stage 2. Reuses stage2 model by default.
-# Override by adding a stage3.model entry and updating hlr_pipeline.py if needed.
-stage3:
-  model: qwen2.5:latest
