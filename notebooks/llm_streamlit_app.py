@@ -339,7 +339,6 @@ with tab1:
                     # on raw LLM output, which fails whenever the model doesn't
                     # return a perfectly-formed Python list literal.
                     # Fix: parse the response line-by-line instead.
-                    final_req = fixed_req
                     if leaked:
                         post_prompt = identifier_rewrite_prompt.format(
                             REQUIREMENTS=fixed_req,
@@ -353,21 +352,22 @@ with tab1:
                         if r2.status_code == 200:
                             raw_replacements = r2.json().get("requirements", ["", ""])[1]
 
-                            try:
-                                raw_replacements_literal = ast.literal_eval(raw_replacements)
+                            # try:
+                            raw_replacements_literal = asast.literal_eval(raw_replacements)
 
-                                # Only apply if we got the right number of replacements
-                                if len(raw_replacements_literal) == len(leaked):
-                                    vmap = dict(zip(leaked, raw_replacements_literal))
-                                    final_req = remove_consecutive_duplicates(
-                                        replace_exact_identifiers(fixed_req, vmap)
-                                    )
-                                else:
-                                    final_req = fixed_req
-                            except:
-                                # Mismatch in count: fall back to fixed_req
-                                # (better than a corrupt substitution)
+                            # Only apply if we got the right number of replacements
+                            if len(raw_replacements_literal) == len(leaked):
+                                vmap = dict(zip(leaked, raw_replacements_literal))
+                                final_req = remove_consecutive_duplicates(
+                                    replace_exact_identifiers(fixed_req, vmap)
+                                )
+                            else:
                                 final_req = fixed_req
+                            # except:
+                            #     # Mismatch in count: fall back to fixed_req
+                            #     # (better than a corrupt substitution)
+                    else:
+                        final_req = fixed_req
 
                     # ── Metrics tracking ──────────────────────────────────────
                     elapsed = time.time() - start_time
