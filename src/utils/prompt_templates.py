@@ -243,12 +243,10 @@ A requirement is TRIVIAL and must be removed if it ONLY describes:
   - Formatting or constructing an auxiliary string or message buffer
   - Setting or clearing a flag to a fixed value (e.g. 0, 1, TRUE, FALSE)
   - Incrementing or decrementing a counter
-  - Clearing, zeroing, or initialising a structure, buffer, or array
-  - Logging, printing, or writing a debug or diagnostic string
-  - Any other bookkeeping step that a tester cannot verify at system level
 
 A requirement is NON-TRIVIAL and must be kept if it describes:
-  - Transmitting or receiving data over an interface
+  - Initializing the module, its data structure, and communication addresses
+  - Transmitting or receiving data or messages over an interface
   - Computing or converting a value using specific numbers or formulas
   - Enforcing a threshold, limit, or timing constraint
   - Triggering a state transition or mode change
@@ -264,7 +262,7 @@ IDENTIFIER REWRITING RULES (apply to every retained requirement):
 OUTPUT RULES:
   - Re-number retained requirements sequentially starting from 1.
   - One requirement per line.
-  - Do NOT explain, comment, or summarise your decisions.
+  - Do NOT explain, comment, or summarise your decisions (STRICT).
   - If ALL requirements are trivial, output exactly: NONE
 
 REQUIREMENTS:
