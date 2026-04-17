@@ -8,15 +8,25 @@ ollama:
 # Stage 1 — C code → Low-Level Requirements (LLR)
 # Needs strong instruction-following and code comprehension.
 #
-# IMPORTANT — Qwen3 determinism:
-# qwen3-coder:30b (and all qwen3-* models) are hybrid thinking/non-thinking
-# models. Their internal chain-of-thought reasoning pass is non-deterministic
-# and is NOT suppressed by temperature=0 or seed=42 alone. This causes
-# Stage 1 to produce different requirements on each run for the same input.
+# NOTE on consistency across runs:
+# qwen3-coder:30b is a NON-THINKING-ONLY MoE model — it does NOT emit
+# <think>...</think> blocks, and `think=False` is a no-op on it (any older
+# comments claiming otherwise were based on a confusion with the hybrid
+# `qwen3:*` models, which ARE thinking/non-thinking hybrids).
 #
-# The fix is applied in api/app.py: think=False is sent as a TOP-LEVEL
-# parameter in the Ollama API request (not inside "options", where it would
-# be silently ignored). This disables the thinking pass entirely.
+# The actual source of Stage 1 inconsistency is KV-cache / slot state in
+# the Ollama server: a freshly-started server produces the best results,
+# and quality degrades on subsequent runs against the same server process
+# because cached prompt prefixes from prior requests contaminate attention
+# state for later requests.
+#
+# The fix is applied in api/app.py:
+#   1. Stage 1 uses a short keep_alive (not -1), so slots are recycled.
+#   2. num_keep=0 is set in Stage 1 options to prevent token retention
+#      across requests.
+#   3. A POST /reset_stage1 endpoint unloads and reloads the Stage 1 model
+#      on demand; the Streamlit UI calls it before each "Generate LLRs"
+#      batch so every run starts from a pristine cache state.
 stage1:
   model: qwen3-coder:30b
 

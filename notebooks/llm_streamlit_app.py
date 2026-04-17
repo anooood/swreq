@@ -49,7 +49,7 @@ from src.utils.prompt_templates import (
     identifier_rewrite_prompt,
     name_prompt_template,
     reqs_prompt_template,
-    second_prompt,
+    trivial_filter_prompt,
 )
 from src.utils.word_output import generate_doc_from_cleaned_and_df
 
@@ -243,6 +243,18 @@ with tab1:
     functions = st.session_state.get("functions", [])
 
     if st.session_state["generation_started"] and not st.session_state["generation_completed"]:
+        # Reset the Stage 1 model in Ollama so every batch starts from a
+        # pristine KV-cache state. Without this, quality degrades on
+        # subsequent runs against the same server process — cached prompt
+        # prefixes from prior requests contaminate attention state for
+        # later requests. The /reset_stage1 endpoint unloads and reloads
+        # the Stage 1 model, giving each batch the same clean-start
+        # behaviour that `./run.sh` provides on a fresh server start.
+        try:
+            requests.post(f"{API_URL}/reset_stage1", timeout=120)
+        except Exception as exc:
+            st.warning(f"Stage 1 reset failed: {exc} — continuing anyway.")
+
         with st.spinner("Parsing C source and generating requirements…"):
             output_file, input_file = pre_processing(selected_module)
             functions = generate_functions(output_file, input_file)
@@ -341,23 +353,18 @@ with tab1:
                         if r2.status_code == 200:
                             raw_replacements = r2.json().get("requirements", ["", ""])[1]
 
-                            # Parse line-by-line instead of ast.literal_eval —
-                            # robust against any LLM formatting variation.
-                            replacement_lines = [
-                                ln.strip().strip("-•").strip().strip('"').strip("'")
-                                for ln in raw_replacements.splitlines()
-                                if ln.strip() and not ln.strip().startswith("[")
-                                   and not ln.strip().startswith("CONCEPTUAL")
-                                   and not ln.strip().startswith("OUTPUT")
-                            ]
+                            try:
+                                raw_replacements_literal = ast.literal_eval(raw_replacements)
 
-                            # Only apply if we got the right number of replacements
-                            if len(replacement_lines) == len(leaked):
-                                vmap = dict(zip(leaked, replacement_lines))
-                                final_req = remove_consecutive_duplicates(
-                                    replace_exact_identifiers(fixed_req, vmap)
-                                )
-                            else:
+                                # Only apply if we got the right number of replacements
+                                if len(raw_replacements_literal) == len(leaked):
+                                    vmap = dict(zip(leaked, raw_replacements_literal))
+                                    final_req = remove_consecutive_duplicates(
+                                        replace_exact_identifiers(fixed_req, vmap)
+                                    )
+                                else:
+                                    final_req = fixed_req
+                            except:
                                 # Mismatch in count: fall back to fixed_req
                                 # (better than a corrupt substitution)
                                 final_req = fixed_req
@@ -374,6 +381,31 @@ with tab1:
                         cleaned_v = re.sub(r"\s*\([^)]*\)", "", v).replace(")", "").strip()
                         if cleaned_v not in final_req:
                             st.session_state["globals_missing_all"].append(cleaned_v)
+
+                    # ── Pass 3: Remove trivial requirements ──────────────────
+                    # The reqs prompt (STEP 2) instructs the LLM to skip trivial
+                    # lines, but in practice it still emits requirements for
+                    # logging, string formatting, flag-set, counter-increment,
+                    # and buffer-zeroing lines.  Pass 3 catches those via a
+                    # dedicated LLM call with a strict trivial-definition prompt.
+
+                    filter_prompt = trivial_filter_prompt.format(
+                        REQUIREMENTS=final_req,
+                    )
+                    r3 = requests.post(
+                        f"{API_URL}/generate",
+                        json={"prompts": ["N/A", filter_prompt]},
+                        timeout=300,
+                    )
+                    if r3.status_code == 200:
+                        raw_filtered = r3.json().get("requirements", ["", ""])[1].strip()
+                        if raw_filtered.upper() == "NONE":
+                            # LLM decided ALL requirements are trivial
+                            final_req = ""
+                        else:
+                            final_req = raw_filtered
+                            # else: LLM returned unparseable output — keep as-is
+                    # else: LLM call failed — keep final_req unchanged
 
                     st.session_state["requirements"][i] = {
                         "Function":             strip_markdown(data["requirements"][0]),

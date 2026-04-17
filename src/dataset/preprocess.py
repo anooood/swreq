@@ -359,10 +359,16 @@ def extract_function_context(extractor: ContextExtractor) -> dict:
         params       = extract_function_parameters(func_node)
         used_structs = {s for s in visitor.struct_accesses if s.split(".")[0] in extractor.globals}
 
+        # Keep the original dotted paths (e.g. "SS_FUZE.FuzeSettings.Delay")
+        # so leak detection catches them if they appear verbatim, AND add
+        # the individual components so partial leaks like just "FuzeSettings"
+        # are also caught by Pass 2's identifier rewrite.
+        used_struct_parts = used_structs | {part for s in used_structs for part in s.split(".")}
+
         context[func_name] = {
             "globals_used":       sorted(visitor.ids & global_names),
             "locals_declared":    sorted(visitor.local_vars | params),
             "functions_called":   sorted(visitor.func_calls & function_names),
-            "used_structures":    used_structs,
+            "used_structures":    used_struct_parts,
         }
     return context
