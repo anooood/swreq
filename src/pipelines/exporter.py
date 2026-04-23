@@ -156,6 +156,7 @@ def _jama_sheet(wb: Workbook, result: "MergeResult"):
         "Description",
         "VerificationMethod",
         "RequirementType",
+        "Engineering Discipline",
         "Function (Source)",
     ]
     _banner(ws, "Jama High-Level Requirements — Import Sheet", len(cols))
@@ -168,7 +169,8 @@ def _jama_sheet(wb: Workbook, result: "MergeResult"):
         _cell(ws, i, 3, _fmt_description(hlr.description), alt)
         _cell(ws, i, 4, hlr.verification_method, alt)
         _cell(ws, i, 5, hlr.requirement_type, alt)
-        _cell(ws, i, 6, hlr.function_name, alt)
+        _cell(ws, i, 6, hlr.engineering_discipline, alt)
+        _cell(ws, i, 7, hlr.function_name, alt)
         ws.row_dimensions[i].height = 65
 
     _widths(ws, {1: 24, 2: 32, 3: 68, 4: 22, 5: 24, 6: 22, 7: 26, 8: 18})

@@ -120,7 +120,10 @@ IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
 
 
 def replace_exact_identifiers(text, mapping):
-    return IDENTIFIER.sub(lambda m: mapping.get(m.group(0), m.group(0)), text)
+    for identifier, replacement in mapping.items():
+        pattern = r'(?<!\S)' + re.escape(identifier) + r'(?!\S)'
+        text = re.sub(pattern, replacement, text)
+    return text
 
 
 def remove_consecutive_duplicates(text):
@@ -156,6 +159,30 @@ def append_df_to_excel(file_path: Path, df: pd.DataFrame, sheet_name: str = "She
         df.to_excel(writer, sheet_name=sheet_name, startrow=start_row,
                     index=False, header=(start_row == 0))
 
+TRIVIAL_RULES = [
+    # format/append/construct + auxiliary string
+    r'\b(format|append|construct)\b.*\b(auxiliary string|aux string|string)\b',
+    # auxiliary control
+    r'\bauxiliary control\b',
+    # flag + 0/1/True/False
+    r'\bflag\b.*\b(0|1|true|false)\b',
+    # clear + flag/string/structure
+    r'\bclear\b.*\b(flag|string|structure)\b',
+    # initialize + 0/zero/1/false/true
+    r'\binitializ\w*\b.*\b(0|zero|1|false|true)\b'
+]
+
+def is_trivial(req: str) -> bool:
+    return any(re.search(rule, req, re.IGNORECASE) for rule in TRIVIAL_RULES)
+
+def filter_trivial_requirements(requirements: list[str]) -> list[str]:
+    
+    # Strip leading numbering (e.g. "1.", "10.")
+    stripped = [re.sub(r'^\d+\.\s*', '', req.strip()) for req in requirements]
+    kept = [req for req in stripped if req.strip() and not is_trivial(req)]
+
+    # Re-number from 1
+    return [f"{i}. {req}" for i, req in enumerate(kept, 1)]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Session state init
@@ -305,33 +332,60 @@ with tab1:
                         continue
 
                     data      = response.json()
-                    fixed_req = data["requirements"][1]
+                    req_pass1 = data["requirements"][1]
 
-                    # Substitute global variable names with their resolved values
-                    for k, v in mapping.items():
-                        cleaned_v = re.sub(r"\s*\([^)]*\)", "", v)
-                        fixed_req = fixed_req.replace(k, cleaned_v)
+                    # ── Pass 2: Remove trivial requirements ──────────────────
+                    # Rule-based approach to remote trivial requirements
 
-                    # ── Leak detection ────────────────────────────────────────
+                    filtered = filter_trivial_requirements(req_pass1.split('\n'))
+                    if not filtered:
+                        req_pass2 = ""
+                    else:
+                        req_pass2 = "\n".join(filtered)
+
+                    # ── Pass 3: Clean up leaked identifiers ───────────────────
+
+                    # ── Leak detection ─────────────────────────────────────────
                     # Collect any C identifiers (variable names, function names,
                     # struct names, the function's own name) that leaked through
                     # into the requirements text despite the prompt instructions.
+
                     ctx = function_context[fn["name"]]
+                    function_names = [x['name'] for x in functions]
                     leaked = []
                     for var in ctx["globals_used"] + ctx["locals_declared"]:
-                        if var not in modules_names and var in fixed_req:
+                        if var not in modules_names and var in req_pass2:
                             leaked.append(var)
                     for func in ctx["functions_called"]:
-                        if func in fixed_req:
+                        if func in req_pass2:
                             leaked.append(func)
                     for struct in ctx["used_structures"]:
-                        if struct not in modules_names and struct in fixed_req:
+                        if struct not in modules_names and struct in req_pass2:
                             leaked.append(struct)
-                    if fn["name"] in fixed_req:
+                    for func_name in function_names:
+                        if func_name in req_pass2:
+                            leaked.append(func_name)
+                    if fn["name"] in req_pass2:
                         leaked.append(fn["name"])
+
+                    code_syntax_pattern = re.compile(
+                        r'\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b'  # dot-joined
+                        r'|'
+                        r'\b[A-Za-z0-9]*_[A-Za-z0-9_]+\b'                             # underscore-joined
+                        r'|'
+                        r'\bs[A-Z][A-Za-z0-9]*(?:[A-Z][A-Za-z0-9]*)+\b'              # s-prefixed structs
+                        r'|'
+                        r'\b[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+\b'                  # PascalCase — excludes all-caps
+                        r'|'
+                        r'\b[a-z]+(?:[A-Z][a-z0-9]+)+\b'                              # camelCase
+                    )
+
+                    for match in code_syntax_pattern.findall(req_pass2):
+                        if (match not in leaked) and (match not in modules_names):
+                            leaked.append(match)
+
                     leaked = list(dict.fromkeys(leaked))  # deduplicate, preserve order
 
-                    # ── Pass 2: Clean up leaked identifiers ───────────────────
                     # Ask the LLM to translate each leaked identifier into a
                     # plain-English conceptual phrase, then substitute in-place.
                     # This is the pass that was previously commented out.
@@ -339,9 +393,10 @@ with tab1:
                     # on raw LLM output, which fails whenever the model doesn't
                     # return a perfectly-formed Python list literal.
                     # Fix: parse the response line-by-line instead.
+
                     if leaked:
                         post_prompt = identifier_rewrite_prompt.format(
-                            REQUIREMENTS=fixed_req,
+                            REQUIREMENTS=req_pass2,
                             VARIABLES=leaked,
                         )
                         r2 = requests.post(
@@ -351,28 +406,24 @@ with tab1:
                         )
                         if r2.status_code == 200:
                             raw_replacements = r2.json().get("requirements", ["", ""])[1]
+                            try:
+                                vmap = json.loads(raw_replacements)
+                            except (json.JSONDecodeError, ValueError):
+                                try:
+                                    vmap = asast.literal_eval(raw_replacements)
+                                except (ValueError, SyntaxError):
+                                    vmap = {}
 
-                            # try:
-                            raw_replacements_literal = asast.literal_eval(raw_replacements)
-
-                            # Only apply if we got the right number of replacements
-                            if len(raw_replacements_literal) == len(leaked):
-                                vmap = dict(zip(leaked, raw_replacements_literal))
-                                final_req = remove_consecutive_duplicates(
-                                    replace_exact_identifiers(fixed_req, vmap)
-                                )
+                            if isinstance(vmap, dict) and vmap:
+                                final_req = replace_exact_identifiers(req_pass2, vmap)
                             else:
-                                final_req = fixed_req
-                            # except:
-                            #     # Mismatch in count: fall back to fixed_req
-                            #     # (better than a corrupt substitution)
+                                final_req = req_pass2
+                        else:
+                            final_req = req_pass2
                     else:
-                        final_req = fixed_req
+                        final_req = req_pass2
 
                     # ── Metrics tracking ──────────────────────────────────────
-                    elapsed = time.time() - start_time
-                    st.session_state["inference_times"].append(elapsed)
-
                     for var in ctx["globals_used"] + ctx["locals_declared"]:
                         if var not in modules_names and var in final_req:
                             st.session_state["variables_leaked_all"].append(var)
@@ -382,30 +433,8 @@ with tab1:
                         if cleaned_v not in final_req:
                             st.session_state["globals_missing_all"].append(cleaned_v)
 
-                    # ── Pass 3: Remove trivial requirements ──────────────────
-                    # The reqs prompt (STEP 2) instructs the LLM to skip trivial
-                    # lines, but in practice it still emits requirements for
-                    # logging, string formatting, flag-set, counter-increment,
-                    # and buffer-zeroing lines.  Pass 3 catches those via a
-                    # dedicated LLM call with a strict trivial-definition prompt.
-
-                    filter_prompt = trivial_filter_prompt.format(
-                        REQUIREMENTS=final_req,
-                    )
-                    r3 = requests.post(
-                        f"{API_URL}/generate",
-                        json={"prompts": ["N/A", filter_prompt]},
-                        timeout=300,
-                    )
-                    if r3.status_code == 200:
-                        raw_filtered = r3.json().get("requirements", ["", ""])[1].strip()
-                        if raw_filtered.upper() == "NONE":
-                            # LLM decided ALL requirements are trivial
-                            final_req = ""
-                        else:
-                            final_req = raw_filtered
-                            # else: LLM returned unparseable output — keep as-is
-                    # else: LLM call failed — keep final_req unchanged
+                    elapsed = time.time() - start_time
+                    st.session_state["inference_times"].append(elapsed)
 
                     st.session_state["requirements"][i] = {
                         "Function":             strip_markdown(data["requirements"][0]),

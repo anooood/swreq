@@ -27,7 +27,9 @@ from typing import Any
 import pandas as pd
 import requests
 
-from src.utils.reference_loader import verification_methods_block
+from src.utils.reference_loader import verification_methods_block, requirement_type_block
+from src.utils.prompt_templates import _REWRITE_PROMPT
+from src.utils.prompt_logger import log_prompt, log_response, log_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,7 @@ class HighLevelRequirement:
     description: str
     verification_method: str
     requirement_type: str
+    engineering_discipline: str = "Software"
 
 @dataclass
 class MergeResult:
@@ -112,61 +115,6 @@ def parse_groups_from_csv(path: str) -> list[FunctionGroup]:
     ]
 
 # ---------------------------------------------------------------------------
-# LLM prompt
-# ---------------------------------------------------------------------------
-
-_REWRITE_PROMPT = """\
-You are a systems-engineering expert rewriting requirements for a Jama requirements database.
-
-You are given a SOFTWARE FUNCTION NAME and a DRAFT REQUIREMENTS STRING for that function.
-The draft may contain one or several obligations written informally or non-compliantly.
-
-YOUR TASKS:
-1. Read the draft carefully and identify every distinct obligation or requirement within it.
-2. Decide how many separate Jama requirements are needed (one per distinct obligation).
-   - Split if two or more clearly different obligations are bundled together.
-   - Keep as one if the draft expresses a single coherent requirement.
-3. For each requirement, rewrite the Description as a Jama-compliant "shall" statement.
-4. PRESERVE ALL DETAILS from the original draft — do not drop any information,
-   numeric values, named interfaces, timing constraints, or conditions (IMPORTANT)
-
-REWRITING RULES for every Description:
-  R1. Must start with "The system shall" or "The <subsystem> shall"
-  R2. Must be a SINGLE sentence — one obligation per requirement
-      (never use "and shall", "and must", "as well as" to chain two obligations)
-  R3. Must be verifiable — a tester can unambiguously pass or fail it
-  R4. Must be unambiguous — replace vague words:
-        "appropriate" → specific criterion
-        "adequate"    → measurable threshold
-        "support"     → specific capability
-        "as needed"   → defined condition
-        "properly"    → explicit acceptance criterion
-        "etc."        → enumerate all items or use a defined reference
-  R5. Must describe WHAT the system shall do, not HOW it shall do it
-  R6. Use active voice ("the system shall X", not "X shall be done")
-  R7. Mention all numerical values (e.g. conversions, timing thresholds..) from the original draft (IMPORTANT)
-
-For EACH rewritten requirement output a JSON object with these keys:
-  "name"                    : short noun-phrase title (max 5 words, no verbs)
-  "description"             : the rewritten "shall" statement (apply rules R1-R7)
-  "verification_method"     : one of [Analysis, Inspection, Test, Demonstration]
-                            Use the VERIFICATION METHODS REFERENCE below to select the correct method.
-                                Test          → exercised and measured at runtime
-                                Inspection    → verified by reviewing design or code
-                                Analysis      → verified by calculation or modelling
-                                Demonstration → verified by operating the system
-  "requirement_type"        : one of [Functional Req., Performance Req., Interface Req., Constraint Req.]
-
-Respond ONLY with a JSON array of such objects.
-Do NOT include any text outside the JSON array.
-
-{verification_methods_context}
-
-Function name        : {function_name}
-Draft requirements   : {draft}
-"""
-
-# ---------------------------------------------------------------------------
 # Ollama call
 # ---------------------------------------------------------------------------
 
@@ -197,6 +145,7 @@ def rewrite_function(
     model: str,
     base_url: str,
     vm_context: str = "",
+    rt_context: str = ""
 ) -> list[dict]:
     """
     Sends the full draft string to the LLM and returns a list of rewritten
@@ -208,8 +157,10 @@ def rewrite_function(
         function_name = group.function_name,
         draft         = group.draft,
         id_start      = id_start,
-        verification_methods_context = vm_context
+        verification_methods_context = vm_context,
+        requirement_type_context = rt_context
     )
+    log_prompt("rewrite", group.function_name, prompt)
     try:
         raw    = _call_ollama(prompt, model, base_url)
         result = _safe_json_parse(raw)
@@ -239,7 +190,9 @@ def run_merge(groups: list[FunctionGroup], model: str, base_url: str) -> MergeRe
     per function. Progress is printed to stdout.
     """
     # Load verification methods context once for the whole run
+    print(f"  Prompt log → {log_file_path()}")
     vm_context = verification_methods_block()
+    rt_context = requirement_type_block()
 
     n_groups    = len(groups)
     hlrs: list[HighLevelRequirement] = []
@@ -256,8 +209,9 @@ def run_merge(groups: list[FunctionGroup], model: str, base_url: str) -> MergeRe
         )
 
         id_start = f"#{hlr_counter + 1:03d}"
-        raw_list = rewrite_function(group, id_start, model, base_url, vm_context=vm_context)
-
+        raw_list = rewrite_function(group, id_start, model, base_url,
+                                    vm_context=vm_context,
+                                    rt_context=rt_context) 
         for raw in raw_list:
             hlr_counter += 1
             notes = raw.get("compliance_notes", "")
@@ -266,8 +220,9 @@ def run_merge(groups: list[FunctionGroup], model: str, base_url: str) -> MergeRe
                 function_name           = group.function_name,
                 name                    = str(raw.get("name", group.function_name)),
                 description             = str(raw.get("description", group.draft)),
-                verification_method     = str(raw.get("verification_method", "Analysis")),
+                verification_method     = str(raw.get("verification_method", "Test")),
                 requirement_type        = str(raw.get("requirement_type", "Functional")),
+                engineering_discipline  = str(raw.get("engineering_discipline", "Software")),
             ))
 
         print(f"→ {len(raw_list)} requirement(s)")
