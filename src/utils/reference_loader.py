@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_VM_PATH = _REPO_ROOT / "data" / "references" / "Verification Methods.docx"
-
+_DEFAULT_RT_PATH = _REPO_ROOT / "data" / "references" / "requirement_type_context.md"
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -117,6 +117,32 @@ def verification_methods_block(path: str | Path | None = None) -> str:
     return (
         "VERIFICATION METHODS REFERENCE (from Verification Methods.docx)\n"
         "Use the definitions below when selecting a verification_method.\n"
+        "════════════════════════════════════════════════════════════════\n"
+        f"{text}\n"
+        "════════════════════════════════════════════════════════════════\n"
+    )
+
+@lru_cache(maxsize=1)
+def load_requirement_type_context(path: str | Path | None = None) -> str:
+    target = Path(path) if path else _DEFAULT_RT_PATH
+    if not target.exists():
+        logger.warning("Requirement type context not found at '%s'.", target)
+        return ""
+    try:
+        text = target.read_text(encoding="utf-8")
+        logger.info("Loaded requirement type context (%d chars) from '%s'.", len(text), target)
+        return text
+    except Exception as exc:
+        logger.warning("Failed to read '%s': %s — proceeding without context.", target, exc)
+        return ""
+
+def requirement_type_block(path: str | Path | None = None) -> str:
+    text = load_requirement_type_context(path)
+    if not text:
+        return ""
+    return (
+        "REQUIREMENT TYPE REFERENCE\n"
+        "Use the definitions below when selecting a requirement_type.\n"
         "════════════════════════════════════════════════════════════════\n"
         f"{text}\n"
         "════════════════════════════════════════════════════════════════\n"

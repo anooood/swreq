@@ -155,72 +155,22 @@ GLOBAL VARIABLES (value mapping):
 FINAL OUTPUT:
 """
 
-second_prompt = """
-ROLE
-You are an expert systems engineer performing a second-pass quality audit on software requirements.
-
-OBJECTIVE
-Review each software requirement line-by-line and ensure that it is written in clear, conceptual, plain English suitable for a formal requirements document.
-
-INPUTS
-You will be given:
-1. A list of software requirements generated in a first pass.
-2. A list of leaked variable names and/or code identifiers that MUST NOT appear in final requirements.
-
-TASK
-For EACH requirement, do the following independently:
-
-1. Inspect the requirement for the presence of ANY identifier from the leaked variables list.
-2. If NO leaked identifiers are present:
-   - Return the requirement exactly as-is.
-3. If ANY leaked identifiers are present:
-   - Rewrite the requirement to remove ALL variable names and code-specific identifiers.
-   - Preserve the original technical intent and behavior.
-   - Express the logic conceptually using natural, plain English.
-   - Do NOT introduce new variable names, symbols, or code-like phrases.
-   - Do NOT reference implementation details (e.g., variable names, data structures, function calls).
-
-STYLE RULES
-- Use formal, unambiguous requirements language.
-- Prefer phrases such as:
-  - “the system shall…”
-  - “the application shall…”
-  - “the software shall…”
-- Do NOT mention source code, variables, or functions.
-- Do NOT explain what was changed.
-- Do NOT add extra functionality.
-- Do NOT merge or split requirements.
-
-OUTPUT FORMAT
-Return the results in the same order as the input requirements.
-Each output line MUST correspond to exactly one input requirement.
-
-If a requirement was rewritten, output only the rewritten requirement.
-If a requirement was not rewritten, output it unchanged.
-
-INITIAL REQUIREMENTS:
-{REQUIREMENTS}
-
-LEAKED VARIABLES:
-{VARIABLES}
-
-FINAL REQUIREMENTS:
-"""
-
 identifier_rewrite_prompt = """
 ROLE
 You are an expert systems engineer.
 
 TASK
-Using the INITIAL REQUIREMENTS as context, rewrite each identifier in the LEAKED IDENTIFIERS list conceptually in clear, natural English suitable for a formal requirements document. 
+Using the INITIAL REQUIREMENTS as context, rewrite each identifier in the LEAKED IDENTIFIERS list conceptually in clear, natural English suitable for a formal requirements document.
 Ensure the replacements make sense in the sentence and it is cohesive.
 
 OUTPUT
-Return **only a list of the rewritten identifiers**, one per line, in the same order as the input.
-Do not include the original identifiers or the full requirements.
+Return ONLY a JSON object mapping each original identifier to its rewritten version.
+Do not include the original identifiers as values, explanations, or the full requirements.
+Do not output anything outside the JSON object.
 
 Example:
-['Weapon.Wind', 'TelemetryBuild2HzBlock2'] --> ['Weapon wind', 'telemetry build 2Hz block']
+Input:  ["Weapon.Wind", "TelemetryBuild2HzBlock2"]
+Output: {{"Weapon.Wind": "weapon wind", "TelemetryBuild2HzBlock2": "telemetry build 2Hz block"}}
 
 INITIAL REQUIREMENTS:
 {REQUIREMENTS}
@@ -228,45 +178,62 @@ INITIAL REQUIREMENTS:
 LEAKED IDENTIFIERS:
 {VARIABLES}
 
-CONEPTUAL IDENTIFIERS:
+CONCEPTUAL IDENTIFIERS:
 """
 
-trivial_filter_prompt = """
-You are a systems-engineering reviewer. You are given a list of software requirements generated from C source code.
+trivial_filter_prompt = """"""
 
-YOUR TASK:
-1. Remove any requirement that describes a trivial implementation detail with no externally observable behavior.
-2. In every retained requirement, rewrite any code-style identifier conceptually in plain English.
-3. Re-number the retained requirements sequentially starting from 1.
+_REWRITE_PROMPT = """
+You are a systems-engineering expert rewriting requirements for a Jama requirements database.
 
-A requirement is TRIVIAL and must be removed if it ONLY describes:
-  - Formatting or constructing an auxiliary string or message buffer
-  - Setting or clearing a flag to a fixed value (e.g. 0, 1, TRUE, FALSE)
-  - Incrementing or decrementing a counter
+You are given a SOFTWARE FUNCTION NAME and a DRAFT REQUIREMENTS STRING for that function.
+The draft may contain one or several obligations written informally or non-compliantly.
 
-A requirement is NON-TRIVIAL and must be kept if it describes:
-  - Initializing the module, its data structure, and communication addresses
-  - Transmitting or receiving data or messages over an interface
-  - Computing or converting a value using specific numbers or formulas
-  - Enforcing a threshold, limit, or timing constraint
-  - Triggering a state transition or mode change
+YOUR TASKS:
+1. Read the draft carefully and identify every distinct obligation or requirement within it.
+2. Decide how many separate Jama requirements are needed (one per distinct obligation).
+   - Split if two or more clearly different obligations are bundled together.
+   - Keep as one if the draft expresses a single coherent requirement.
+3. For each requirement, rewrite the Description as a Jama-compliant "shall" statement.
+4. PRESERVE ALL DETAILS from the original draft — do not drop any information,
+   numeric values, named interfaces, timing constraints, or conditions (IMPORTANT)
 
-IDENTIFIER REWRITING RULES (apply to every retained requirement):
-  - Any word containing an underscore is a code identifier and MUST be rewritten as a conceptual phrase
-    (e.g. "raw_temp_value" → "raw temperature value", "err_flag" → "error status flag")
-  - camelCase and PascalCase identifiers must also be rewritten
-    (e.g. "batteryVoltage" → "battery voltage", "MotorSpeed" → "motor speed")
-  - ALL numerical values (thresholds, offsets, hex IDs, timing values) MUST be preserved exactly
-  - Do NOT introduce new identifiers or variable names
+REWRITING RULES for every Description:
+  R1. Must start with "The system shall" or "The <subsystem> shall"
+  R2. Must be a SINGLE sentence — one obligation per requirement
+      (never use "and shall", "and must", "as well as" to chain two obligations)
+  R3. Must be verifiable — a tester can unambiguously pass or fail it
+  R4. Must be unambiguous — replace vague words:
+        "appropriate" → specific criterion
+        "adequate"    → measurable threshold
+        "support"     → specific capability
+        "as needed"   → defined condition
+        "properly"    → explicit acceptance criterion
+        "etc."        → enumerate all items or use a defined reference
+  R5. Must describe WHAT the system shall do, not HOW it shall do it
+  R6. Use active voice ("the system shall X", not "X shall be done")
+  R7. Mention all numerical values (e.g. conversions, timing thresholds..) from the original draft (IMPORTANT)
 
-OUTPUT RULES:
-  - Re-number retained requirements sequentially starting from 1.
-  - One requirement per line.
-  - Do NOT explain, comment, or summarise your decisions (STRICT).
-  - If ALL requirements are trivial, output exactly: NONE
+For EACH rewritten requirement output a JSON object with these keys:
+  "name"                    : short noun-phrase title (max 5 words, no verbs)
+  "description"             : the rewritten "shall" statement (apply rules R1-R7)
+  "verification_method"     : one of [Analysis, Inspection, Test, Demonstration]
+                            Use the VERIFICATION METHODS REFERENCE below to select the correct method.
+                                Test          → exercised and measured at runtime
+                                Inspection    → verified by reviewing design or code
+                                Analysis      → verified by calculation or modelling
+                                Demonstration → verified by operating the system
+  "requirement_type"        : one of [Functional Req., Performance Req., Interface Req., Constraint Req.]
+                            Use the REQUIREMENT TYPE REFERENCE below to select the correct type.
+  "engineering_discpline"   : "Software"
 
-REQUIREMENTS:
-{REQUIREMENTS}
+Respond ONLY with a JSON array of such objects.
+Do NOT include any text outside the JSON array.
 
-FILTERED REQUIREMENTS:
+{verification_methods_context}
+
+{requirement_type_context}
+
+Function name        : {function_name}
+Draft requirements   : {draft}
 """

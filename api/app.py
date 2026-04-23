@@ -55,6 +55,7 @@ import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from datetime import datetime
 
 # Ensure repo root is on sys.path when uvicorn is started from any directory
 _REPO_ROOT = _Path(__file__).resolve().parent.parent
@@ -62,6 +63,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 logger = logging.getLogger(__name__)
+_PROMPT_LOG = _REPO_ROOT / "artifacts" / "logs" / "prompts.log"
+_PROMPT_LOG.parent.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Load model config from configs/model.yaml
@@ -409,18 +412,28 @@ def rewrite(req: RewriteRequest):
     from src.pipelines.inference_pipeline import (
         FunctionGroup, rewrite_function, _REWRITE_PROMPT, _safe_json_parse,
     )
-    from src.utils.reference_loader import verification_methods_block
+    from src.utils.reference_loader import verification_methods_block, requirement_type_block
     import logging as _log
 
     group      = FunctionGroup(function_name=req.function_name, draft=req.draft)
     vm_context = verification_methods_block()
+    rt_context = requirement_type_block()
 
     prompt = _REWRITE_PROMPT.format(
         function_name               = group.function_name,
         draft                       = group.draft,
         verification_methods_context = vm_context,
+        requirement_type_context = rt_context
     )
 
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _PROMPT_LOG.open("a", encoding="utf-8") as f:
+        f.write(f"\n{'━' * 80}\n")
+        f.write(f"[{ts}]  model={STAGE2_MODEL}  function={req.function_name}\n")
+        f.write(f"{'─' * 80}\n")
+        f.write(prompt)
+        f.write("\n")
+        
     try:
         raw = _ollama_generate(
             prompt,

@@ -30,8 +30,8 @@ from openpyxl.utils import get_column_letter
 # ---------------------------------------------------------------------------
 
 
-COLS       = ["Level", "Name", "Description", "VerificationMethod", "RequirementType"]
-COL_WIDTHS = {1: 8, 2: 55, 3: 70, 4: 22, 5: 22}
+COLS       = ["Level", "Name", "Description", "VerificationMethod", "RequirementType", "EngineeringDiscipline"]
+COL_WIDTHS = {1: 8, 2: 55, 3: 70, 4: 22, 5: 22, 6: 24}
 
 PLAIN_FONT  = Font(name="Arial", size=10)
 HEADER_FONT = Font(name="Arial", size=10, bold=True)
@@ -71,7 +71,7 @@ def _plain_row(ws, row_idx: int, values: list[str], height: int = 15, indent: in
 
 
 def _plain_section(ws, row_idx: int, level: int, name: str):
-    _plain_row(ws, row_idx, [str(level), name, "", "", ""], indent=level)
+    _plain_row(ws, row_idx, [str(level), name, "", "", "", ""], indent=level)
 
 
 def _plain_req(ws, row_idx: int, level: int, hlr):
@@ -81,6 +81,7 @@ def _plain_req(ws, row_idx: int, level: int, hlr):
         hlr.description,
         hlr.verification_method,
         hlr.requirement_type,
+        hlr.engineering_discipline,
     ], height=30, indent=level)
 
 
@@ -102,7 +103,7 @@ def _color_row(ws, row_idx: int, level: int, values: list[str]):
 
 
 def _color_section(ws, row_idx: int, level: int, name: str):
-    _color_row(ws, row_idx, level, [str(level), name, "", "", ""])
+    _color_row(ws, row_idx, level, [str(level), name, "", "", "", ""])
 
 
 def _color_req(ws, row_idx: int, level: int, hlr):
@@ -112,6 +113,7 @@ def _color_req(ws, row_idx: int, level: int, hlr):
         hlr.description,
         hlr.verification_method,
         hlr.requirement_type,
+        hlr.engineering_discipline,
     ])
 
 
