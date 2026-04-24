@@ -34,8 +34,8 @@ env/
 models/
 
 # Data & outputs (avoid committing large files)
-data/P3_MCP_Application/
-data/C_Parsed/
+data/
+!data/references
 artifacts/Experiments/**/*.pt
 artifacts/Experiments/**/*.bin
 artifacts/*.xslx

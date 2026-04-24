@@ -319,10 +319,7 @@ with tab1:
 
     functions = st.session_state.get("functions", [])
 
-    _did_generate_this_run = False
-
     if st.session_state["generation_started"] and not st.session_state["generation_completed"]:
-        _did_generate_this_run = True
         # Reset the Stage 1 model in Ollama so every batch starts from a
         # pristine KV-cache state. Without this, quality degrades on
         # subsequent runs against the same server process — cached prompt
@@ -498,54 +495,10 @@ with tab1:
                         "Globals":              mapping,
                     }
 
-                # Render the full editable form inline as soon as this function
-                # is generated. This gives incremental feedback instead of
-                # waiting for all functions to finish. After generation completes
-                # (generation_completed = True), the persistent block below
-                # takes over on subsequent reruns.
+                # Show a simple status line while generation runs.
+                # Full form rendering happens in the persistent block below.
                 req = st.session_state["requirements"][i]
-
-                with placeholder.container():
-                    col_req, col_code = st.columns([1, 1])
-
-                    with col_req:
-                        form_key  = f"{selected_module}_form_{i}"
-                        title_key = f"title_{selected_module}_{i}"
-                        body_key  = f"body_{selected_module}_{i}"
-
-                        with st.form(form_key, clear_on_submit=False):
-                            st.text_input("Requirement Title", value=req["Function"],      key=title_key)
-                            st.text_area("Requirement Text",   value=req["Requirements"],
-                                         key=body_key, height=auto_height(req["Requirements"]))
-
-                            btn_col, approve_col = st.columns([1, 1])
-                            with btn_col:
-                                submitted = st.form_submit_button("Apply changes")
-                            with approve_col:
-                                approved_now = st.checkbox(
-                                    "User approved",
-                                    value=req.get("Approved", False),
-                                    key=f"approve_{selected_module}_{i}",
-                                )
-
-                            if submitted:
-                                st.session_state["requirements"][i].update({
-                                    "Function":     st.session_state[title_key],
-                                    "Requirements": st.session_state[body_key],
-                                    "Applied":      True,
-                                    "Approved":     approved_now,
-                                })
-                                st.success("Changes applied")
-
-                        st.markdown(format_globals(req["Globals"]))
-                        st.markdown(f"**Response time:** {round(req['ModelResponseTimeSec'], 2)} s")
-
-                    with col_code:
-                        with st.expander("Code Reference", expanded=True):
-                            st.code(fn["content"], language="c")
-
-                    st.divider()
-
+                placeholder.info(f"✔ `{req['Function']}` — {round(req['ModelResponseTimeSec'], 2)} s")
                 progress.progress((i + 1) / len(functions))
 
         st.session_state["generation_completed"] = True
@@ -553,12 +506,8 @@ with tab1:
     # ── Persistent requirements rendering ─────────────────────────────────────
     # Rendered from session_state on every rerun, so Apply/Save button clicks
     # (which trigger full script reruns) don't wipe the UI.
-    # Skipped on the run that just finished generation — the generation loop
-    # already rendered the forms inline, so we'd otherwise get duplicate keys.
 
-    if (st.session_state["generation_completed"]
-            and st.session_state["requirements"]
-            and not _did_generate_this_run):
+    if st.session_state["generation_completed"] and st.session_state["requirements"]:
         st.subheader(f"Requirements for **{selected_module}**")
 
         for i, fn in enumerate(st.session_state.get("functions", [])):
