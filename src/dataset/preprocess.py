@@ -204,13 +204,13 @@ def pre_processing(selected_module: str, git_folder: str | None = None):
     # versions of <math.h>, <stdio.h>, etc., that pycparser can swallow.
     #
     # Search order:
-    #   1. FAKE_LIBC_INCLUDE env var       (explicit override)
-    #   2. <repo_root>/fake_libc_include   (bundled copy, used in Docker)
-    #   3. pycparser source distribution   (local installs from GitHub)
+    #   1. FAKE_LIBC_INCLUDE env var            (explicit override)
+    #   2. <repo_root>/data/fake_libc_include   (bundled copy, used in Docker)
+    #   3. pycparser source distribution        (local installs from GitHub)
     repo_root = Path(__file__).resolve().parents[2]
     candidates = [
         os.environ.get("FAKE_LIBC_INCLUDE"),
-        str(repo_root / "fake_libc_include"),
+        str(repo_root / "data" / "fake_libc_include"),
         os.path.join(os.path.dirname(pycparser.__file__), "utils", "fake_libc_include"),
     ]
     fake_include = next((c for c in candidates if c and Path(c).exists()), None)
@@ -218,7 +218,7 @@ def pre_processing(selected_module: str, git_folder: str | None = None):
         raise RuntimeError(
             "fake_libc_include not found. Either:\n"
             "  • set FAKE_LIBC_INCLUDE to its absolute path,\n"
-            "  • copy it to <repo_root>/fake_libc_include/, or\n"
+            "  • copy it to <repo_root>/data/fake_libc_include/, or\n"
             "  • install pycparser from source (pip install git+https://github.com/eliben/pycparser)."
         )
 

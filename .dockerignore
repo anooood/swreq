@@ -9,6 +9,7 @@ venv/
 # Local data & outputs — these are volume-mounted at runtime
 data/
 !data/references
+!data/fake_libc_include
 artifacts/
 logs/
 users.db
@@ -24,4 +25,4 @@ users.db
 tests/
 .pytest_cache/
 .ruff_cache/
-notebooks/llm_streamlit_app_old.py
+notebooks/

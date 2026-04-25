@@ -1,6 +1,6 @@
 """
-notebooks/llm_streamlit_app.py
--------------------------------
+src/llm_streamlit_app.py
+-------------------------
 Unified Streamlit UI for the two-stage requirements pipeline:
 
   Stage 1 — Code Analysis  : Parse C source → generate Low-Level Requirements (LLR)

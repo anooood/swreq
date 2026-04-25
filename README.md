@@ -1,8 +1,10 @@
 # swreq — Software Requirements Generator
 
-Parses C source code and produces formal, **Jama-compliant High-Level Requirements (HLR)** through a fully automated two-stage LLM pipeline.
+Parses C source code and produces formal, **Jama-compliant Low-Level Requirements (LLR)** through a fully automated two-stage LLM pipeline.
 
 All LLM inference is handled by a **local Ollama instance** — no cloud API keys, no model weights in the repo.
+
+The recommended way to run swreq is in **Docker**. The same `docker compose` commands work identically on Linux, macOS, and Windows (WSL 2 or Docker Desktop).
 
 ---
 
@@ -22,10 +24,10 @@ Stage 2 — Jama Compliance
   LLR CSV (from Stage 1 or uploaded)
       │  Ollama LLM (Jama rewrite prompt)
       ▼
-  Jama-compliant HLRs (ID, shall statement, verification, type)
+  Jama-compliant LLRs (ID, shall statement, verification, type)
       │
       ▼
-  Jama-importable Excel .xlsx + HLR .csv
+  Jama-importable Excel .xlsx + LLR .csv
 ```
 
 Both stages run inside a single **Streamlit UI**. LLM calls are routed through a **FastAPI server** that acts as a thin proxy to Ollama.
@@ -36,165 +38,206 @@ Both stages run inside a single **Streamlit UI**. LLM calls are routed through a
 
 ```
 swreq/
-├── run.sh                              ← Start/stop the entire application
-│
 ├── api/
-│   └── app.py                          ← FastAPI server (Ollama proxy)
+│   ├── app.py                          ← FastAPI server (Ollama proxy)
+│   └── auth.py                         ← Bearer-token auth dependency
 │
-├── notebooks/
-│   └── llm_streamlit_app.py            ← Unified Streamlit UI (Stage 1 + 2)
+├── core/
+│   ├── auth.py                         ← Streamlit login + token issuer
+│   └── database.py                     ← SQLite + bcrypt user store
 │
 ├── src/
+│   ├── llm_streamlit_app.py            ← Unified Streamlit UI (Stage 1 + 2)
 │   ├── dataset/
-│   │   ├── preprocess.py               ← C parser, function extractor (pycparser)
-│   │   └── dataset_loader.py
+│   │   └── preprocess.py               ← C parser, function extractor (pycparser)
 │   ├── pipelines/
-│   │   ├── inference_pipeline.py       ← LLR → Jama HLR rewrite pipeline
+│   │   ├── inference_pipeline.py       ← LLR → Jama LLR rewrite pipeline
 │   │   ├── exporter.py                 ← MergeResult → Jama Excel workbook
 │   │   └── hierarchy_sheet.py          ← Jama hierarchy sheet builder
-│   ├── utils/
-│   │   ├── prompt_templates.py         ← All LLM prompt templates
-│   │   ├── word_output.py              ← Word document generator
-│   │   ├── logger.py
-│   │   └── config_utils.py
-│   ├── models/
-│   │   ├── base_model.py               ← OllamaLLM client class
-│   │   └── finetune.py
-│   └── evaluation/
-│       └── eval_metrics.py
+│   └── utils/
+│       ├── prompt_templates.py         ← All LLM prompt templates
+│       ├── prompt_logger.py
+│       ├── reference_loader.py
+│       └── word_output.py              ← Word document generator
 │
 ├── configs/
-│   ├── model.yaml                      ← Ollama model + URL config
-│   ├── data.yaml                       ← Input/output paths
-│   └── train.yaml                      ← Fine-tuning config (placeholder)
+│   └── model.yaml                      ← Stage 1 + Stage 2 model config
 │
 ├── data/
-│   ├── P3_MCP_Application/cmake-src/src/   ← PUT YOUR C SOURCE FILES HERE
-│   └── C_Parsed/                           ← Auto-generated preprocessed files
+│   ├── references/                     ← Verification methods + requirement type docs
+│   └── fake_libc_include/              ← pycparser stub headers (required)
 │
-├── artifacts/                          ← All outputs saved here
-│   ├── logs/                           ← api.log, ui.log
-│   └── Experiments/
+├── deployments/
+│   ├── docker/
+│   │   ├── Dockerfile.api              ← FastAPI image
+│   │   └── Dockerfile.ui               ← Streamlit image
+│   ├── edge_device/
+│   └── k8s/
 │
-├── tests/
-│   ├── development/
-│   ├── sit/
-│   ├── uat/
-│   └── production/
+├── notebooks/                          ← Jupyter experiments only
+├── scripts/                            ← CLI helpers
+├── tests/                              ← development / sit / uat / production
+├── artifacts/                          ← All generated outputs land here
+│   └── logs/
 │
-├── scripts/
-│   ├── main.py                         ← Headless CLI (LLR → Jama)
-│   └── serve.sh
+├── ci_cd/  hpc/  dbscripts/            ← Infrastructure (extend as needed)
 │
-├── deployments/ hpc/ ci_cd/ dbscripts/ ← Infrastructure (extend as needed)
+├── docker-compose.yml
+├── .env.example
+├── manage_users.py                     ← User-management CLI
+├── run.sh                              ← Bare-metal launcher (alternative to Docker)
 ├── requirements.txt
 ├── pyproject.toml
-├── .gitignore
-├── .gitattributes
-└── .gitlab-ci.yml
+├── .gitignore  .gitattributes  .gitlab-ci.yml
+└── README.md
 ```
 
 ---
 
-## Setup
+## Prerequisites
 
-### 1. Prerequisites
+These are the only host-side requirements. Everything else runs inside containers.
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Python | 3.10+ | [python.org](https://python.org) |
-| GCC | any | `sudo apt-get install build-essential` |
-| Ollama | latest | [ollama.com](https://ollama.com) |
+| Tool | Version | Notes |
+|------|---------|-------|
+| Docker Engine + Docker Compose v2 | 24+ | macOS/Windows: install [Docker Desktop](https://www.docker.com/products/docker-desktop/). Linux: install Docker Engine + the `docker compose` plugin. |
+| Ollama | latest | Install from [ollama.com](https://ollama.com). Runs on the **host**, not in a container. |
 
-### 2. Clone the repository
+> **Why is Ollama not in Docker?** Ollama needs direct GPU access for acceptable performance. Running it on the host (with the GPU drivers it already knows about) is simpler and faster than wiring NVIDIA/Metal passthrough through Compose. The containers reach it over `host.docker.internal`.
+
+### Pull the models you plan to use
+
+In a host terminal — once Ollama is installed and `ollama serve` is running (Docker Desktop / the Ollama installer typically starts it for you):
+
+```bash
+ollama pull qwen3-coder:30b      # Stage 1 default
+ollama pull qwen2.5:latest       # Stage 2 default
+```
+
+Smaller alternatives if VRAM is tight: `mistral:7b`, `llama3.2`, `qwen2.5:14b`.
+
+---
+
+## Quick Start (Docker, all OSes)
+
+### 1. Clone the repository
 
 ```bash
 git clone <repo-url>
 cd swreq
 ```
 
-### 3. Create and activate a virtual environment
+### 2. Create your environment file
+
+Copy the template and fill it in. Use whichever copy command your shell understands:
 
 ```bash
-python -m venv venv
-source venv/bin/activate       # Linux/Mac
-venv\Scripts\activate          # Windows
+# Linux / macOS / Git Bash / WSL
+cp .env.example .env
 ```
 
-### 4. Install Python dependencies
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+Open `.env` in any editor and at minimum set:
+
+| Variable | What to set it to |
+|----------|-------------------|
+| `SWREQ_API_SECRET` | A long random string. Generate one with `openssl rand -hex 32` (Linux/macOS/WSL/Git Bash) or any password generator. |
+| `OLLAMA_BASE_URL` | Leave as `http://host.docker.internal:11434` — works on Linux, macOS, and Windows thanks to the `extra_hosts` entry in `docker-compose.yml`. |
+| `STAGE1_MODEL` / `STAGE2_MODEL` | Match whatever you `ollama pull`-ed. |
+
+### 3. Build and start the stack
 
 ```bash
-pip install -r requirements.txt
+docker compose up --build -d
 ```
 
-> **Note:** `torch` and `transformers` are **not required**. All LLM inference is handled by Ollama.
+This builds two images (`swreq-api`, `swreq-ui`) and starts both containers in the background. The API healthcheck must pass before the UI starts, so first boot takes ~30 s.
 
-### 5. Set up `fake_libc_include` (required by pycparser)
+### 4. Initialise the user database and create your first account
 
 ```bash
-git clone https://github.com/eliben/pycparser.git /tmp/pycparser
-cp -r /tmp/pycparser/utils/fake_libc_include .
+docker compose exec api python manage_users.py init
+docker compose exec api python manage_users.py add
 ```
 
-Or find your pycparser install and copy from there:
-```bash
-python -c "import pycparser; print(pycparser.__file__)"
-# Then copy from <that_path>/utils/fake_libc_include to ./fake_libc_include
-```
+You'll be prompted for a username (e.g. `firstname.lastname`) and a password (8+ characters).
 
-### 6. Pull an Ollama model
+### 5. Open the app
 
-```bash
-ollama serve &          # start Ollama in the background
-ollama pull mistral:7b  # or llama3.2, qwen2.5, etc.
-```
+Browse to **http://localhost:8501** and log in.
 
-### 7. Add your C source files
-
-```bash
-cp /your/codebase/*.c  data/P3_MCP_Application/cmake-src/src/
-```
+The FastAPI Swagger docs are at **http://localhost:8000/docs**.
 
 ---
 
-## Running the Application
+## Day-to-day Docker Commands
 
-### One command — starts everything
+| Task | Command |
+|------|---------|
+| Start (already built) | `docker compose up -d` |
+| Stop | `docker compose down` |
+| Rebuild after code changes | `docker compose up --build -d` |
+| Tail API logs | `docker compose logs -f api` |
+| Tail UI logs | `docker compose logs -f ui` |
+| Open a shell in the API container | `docker compose exec api bash` |
+| List users | `docker compose exec api python manage_users.py list` |
+| Reset a user's password | `docker compose exec api python manage_users.py passwd <username>` |
+| Delete a user | `docker compose exec api python manage_users.py delete <username>` |
+
+### What's mounted from the host
+
+`docker-compose.yml` mounts two host directories as volumes so your data survives container rebuilds:
+
+| Host path | Container path | Purpose |
+|-----------|----------------|---------|
+| `./data` | `/app/data` | `users.db`, uploaded codebases, parsed `.i` files |
+| `./artifacts` | `/app/artifacts` | All generated outputs (`.docx`, `.csv`, `.xlsx`) and logs |
+
+Outputs you generate in the UI appear in `./artifacts/` on your host immediately.
+
+---
+
+## Linux-specific note: file permissions
+
+On Linux the bind-mounted `./data` and `./artifacts` directories will be owned by whatever UID the container writes as. By default that's UID `1000`, which matches most single-user Linux systems. If your host UID differs, build with overrides:
 
 ```bash
-bash run.sh
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d
 ```
 
-This will:
-1. Check all dependencies and Ollama connectivity
-2. Start the **FastAPI server** on port `8000`
-3. Start the **Streamlit UI** on port `8501`
-4. Print the URLs and log file locations
+macOS and Windows users do **not** need this — Docker Desktop handles the UID translation transparently.
 
-Then open: **http://localhost:8501**
+---
 
-### Other run modes
+## Switching Models
+
+Edit `STAGE1_MODEL` and/or `STAGE2_MODEL` in your `.env`, then:
 
 ```bash
-bash run.sh --check     # verify setup without starting servers
-bash run.sh --api-only  # FastAPI only
-bash run.sh --ui-only   # Streamlit only
-bash run.sh --stop      # kill running servers
+docker compose up -d
 ```
 
-### Environment variable overrides
+(No rebuild needed — these are environment variables.)
+
+Make sure the new model is pulled into Ollama on the host first:
 
 ```bash
-OLLAMA_MODEL=llama3.2 API_PORT=9000 UI_PORT=9001 bash run.sh
+ollama pull <model-name>
 ```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `mistral:7b` | Default model (overridable in UI too) |
-| `API_HOST` | `0.0.0.0` | FastAPI bind address |
-| `API_PORT` | `8000` | FastAPI port |
-| `UI_PORT` | `8501` | Streamlit port |
+Recommended models:
+
+| Model | Size | Notes |
+|-------|------|-------|
+| `qwen3-coder:30b` | ~17 GB | Stage 1 default. Strongest code comprehension. |
+| `qwen2.5:latest` | ~5 GB | Stage 2 default. Reliable JSON output. |
+| `mistral:7b` | ~4 GB | Lower-VRAM Stage 1 alternative. |
+| `llama3.2` | ~2 GB | Quick iteration / smoke testing. |
+| `deepseek-r1:14b` | ~9 GB | Strong reasoning, slower. |
 
 ---
 
@@ -202,57 +245,81 @@ OLLAMA_MODEL=llama3.2 API_PORT=9000 UI_PORT=9001 bash run.sh
 
 ### Stage 1 — Code → LLR
 
-1. Select a **C module** from the dropdown
-2. Click **▶ Generate LLRs**
-3. Review and edit each generated requirement inline
-4. Click **Save Word Document** or **Save CSV** to export to `artifacts/`
-5. Proceed to Stage 2 using the tab
+1. **Upload Codebase (ZIP)** — the app auto-detects the folder containing the most `.c` files.
+2. **Select a C module** from the dropdown.
+3. Click **▶ Generate LLRs**.
+4. Review and edit each generated requirement inline; tick **User approved** on every requirement.
+5. Click **Apply changes** for each one, then **Save Word Document** or **Save CSV**.
 
-### Stage 2 — LLR → Jama HLR
+### Stage 2 — LLR → Jama LLR
 
-1. Choose **"Use Stage 1 output"** (auto-loaded) or upload a CSV
-   - CSV must have columns: `Function Name`, `Requirements`
-2. Click **▶ Generate Jama HLRs**
-3. Review the generated HLRs in the preview table
-4. Export as **Jama Excel (.xlsx)** or **HLR CSV** — saved to `artifacts/`
+1. Choose **"Use Stage 1 output"** (auto-loaded once all Stage 1 requirements are approved) **or** upload an LLR CSV with columns `Function Name` and `Requirements`.
+2. Click **▶ Generate Jama LLRs**.
+3. Export as **Jama Excel (.xlsx)** or **HLR CSV**.
+
+All exports land in `./artifacts/` with a timestamp prefix.
 
 ---
 
 ## API Reference
 
-The FastAPI server exposes these endpoints (Swagger UI: `http://localhost:8000/docs`):
+Swagger UI: `http://localhost:8000/docs`
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Liveness + Ollama connectivity |
 | `GET` | `/models` | List available Ollama models |
+| `GET` | `/config` | Show active model configuration |
 | `POST` | `/generate` | Stage 1: two-prompt code → LLR call |
-| `POST` | `/rewrite` | Stage 2: LLR → Jama HLR rewrite |
+| `POST` | `/rewrite` | Stage 2: LLR → Jama LLR rewrite |
+| `POST` | `/reset_stage1` | Evict & reload the Stage 1 model |
+
+All endpoints except `/health`, `/models`, and `/config` require a Bearer token issued by the Streamlit UI on login.
 
 ---
 
 ## Outputs
 
-All outputs are timestamped and saved to `artifacts/`:
+All outputs are timestamped and saved under `./artifacts/`:
 
 | File | Stage | Description |
 |------|-------|-------------|
 | `YYYYMMDD_HHMMSS_<module>_LLR.docx` | 1 | Word document with LLRs |
 | `YYYYMMDD_HHMMSS_<module>_LLR.csv` | 1 | CSV of function + requirement pairs |
-| `YYYYMMDD_HHMMSS_<stem>_Jama_HLR.xlsx` | 2 | Jama-importable Excel workbook |
-| `YYYYMMDD_HHMMSS_<stem>_Jama_HLR.csv` | 2 | HLR CSV with ID, description, type |
+| `YYYYMMDD_HHMMSS_<stem>_Jama_LLR.xlsx` | 2 | Jama-importable Excel workbook |
+| `YYYYMMDD_HHMMSS_<stem>_Jama_LLR.csv` | 2 | LLR CSV with ID, description, type |
 | `run_log.xlsx` | 1 | Cumulative run log (leaked syntax, missing globals) |
-| `logs/api.log` | — | FastAPI server log |
-| `logs/ui.log` | — | Streamlit UI log |
+| `logs/api.log`, `logs/ui.log` | — | Server logs |
+
+---
+
+## Running Without Docker (bare metal)
+
+If you'd rather not use Docker, the legacy launcher still works on Linux/macOS/WSL.
+
+```bash
+python -m venv venv
+source venv/bin/activate                  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+ollama serve &                            # if not already running
+ollama pull qwen3-coder:30b
+bash run.sh                               # starts API on 8000 + UI on 8501
+```
+
+`run.sh` flags: `--check`, `--api-only`, `--ui-only`, `--stop`.
+
+`pycparser` needs `data/fake_libc_include/` — it's already in the repo, so no extra setup is required.
 
 ---
 
 ## Headless CLI (no UI)
 
-For automated pipelines, run Stage 2 directly:
+For automated pipelines, run Stage 2 directly inside the API container:
 
 ```bash
-python main.py --input artifacts/my_LLRs.csv --model mistral:7b
+docker compose exec api python scripts/main.py \
+    --input artifacts/my_LLRs.csv \
+    --model qwen2.5:latest
 # Output: artifacts/my_LLRs_jama.xlsx
 ```
 
@@ -261,30 +328,21 @@ python main.py --input artifacts/my_LLRs.csv --model mistral:7b
 ## Testing
 
 ```bash
-pytest                        # all tests
-pytest tests/development/     # unit tests
-pytest tests/sit/             # system integration
-pytest tests/uat/             # user acceptance
-pytest tests/production/      # smoke tests
+docker compose exec api pytest                     # all tests
+docker compose exec api pytest tests/development/  # unit tests
+docker compose exec api pytest tests/sit/          # system integration
+docker compose exec api pytest tests/uat/          # user acceptance
+docker compose exec api pytest tests/production/   # smoke tests
 ```
 
 ---
 
-## Switching Models
+## Troubleshooting
 
-Any model pulled into Ollama works. In the UI, use the **Settings sidebar** to select the active model. Or set the environment variable:
-
-```bash
-ollama pull llama3.2
-OLLAMA_MODEL=llama3.2 bash run.sh
-```
-
-Recommended models (good quality / speed tradeoff):
-
-| Model | Size | Notes |
-|-------|------|-------|
-| `mistral:7b` | 4 GB | Default, fast, reliable |
-| `llama3.2` | 2 GB | Smaller, good for quick iteration |
-| `qwen2.5:14b` | 9 GB | Higher quality for complex requirements |
-| `deepseek-r1:14b` | 9 GB | Strong reasoning |
-
+| Symptom | Fix |
+|---------|-----|
+| UI says "API ❌" | `docker compose logs api` — usually means Ollama isn't running on the host. Start it with `ollama serve`. |
+| "Cannot reach Ollama at host.docker.internal:11434" | Confirm `ollama serve` is running on the host, then `curl http://localhost:11434/api/tags` from the host. On Linux without Docker Desktop, the `extra_hosts: host.docker.internal:host-gateway` line in `docker-compose.yml` provides this name. |
+| 401 Unauthorized from the API | Your `SWREQ_API_SECRET` differs between containers, or you forgot to log in again after restarting. Make sure it's set once in `.env` and rebuild. |
+| First Stage 1 run fine, later runs degrade | Expected on long-lived servers — the UI calls `POST /reset_stage1` before every batch to flush Ollama's KV cache. If you see this anyway, check that `/reset_stage1` is reachable in the API logs. |
+| `users.db` permission errors on Linux | Rebuild with `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d`. |

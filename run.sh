@@ -53,7 +53,7 @@ hdr()  { echo -e "\n${GREEN}══ $* ══${NC}"; }
 if [[ "$MODE" == "stop" ]]; then
     hdr "Stopping swreq processes"
     pkill -f "uvicorn api.app:app"  2>/dev/null && ok "FastAPI stopped" || warn "FastAPI was not running"
-    pkill -f "streamlit run notebooks/llm_streamlit_app.py" 2>/dev/null && ok "Streamlit stopped" || warn "Streamlit was not running"
+    pkill -f "streamlit run src/llm_streamlit_app.py" 2>/dev/null && ok "Streamlit stopped" || warn "Streamlit was not running"
     exit 0
 fi
 
@@ -151,7 +151,7 @@ start_api() {
 # ── Start Streamlit ───────────────────────────────────────────────────────────
 start_ui() {
     hdr "Starting Streamlit UI (port $UI_PORT)"
-    streamlit run notebooks/llm_streamlit_app.py \
+    streamlit run src/llm_streamlit_app.py \
         --server.port "$UI_PORT" \
         --server.headless true \
         --browser.gatherUsageStats false \

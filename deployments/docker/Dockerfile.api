@@ -28,9 +28,9 @@ COPY api/       ./api/
 COPY core/      ./core/
 COPY src/       ./src/
 COPY configs/   ./configs/
-COPY data/references/ ./data/references/
+COPY data/references/        ./data/references/
+COPY data/fake_libc_include/ ./data/fake_libc_include/
 COPY manage_users.py  ./
-COPY fake_libc_include/ ./fake_libc_include/
 
 # Create directories the app writes to, and a non-root user
 ARG HOST_UID=1000
