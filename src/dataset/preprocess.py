@@ -14,14 +14,16 @@ from typing import List, Union
 
 import pycparser
 import regex as re
-from pycparser import c_ast, c_generator, c_parser, parse_file, plyparser
+from pycparser import c_ast, c_generator, parse_file
 
 # ---------------------------------------------------------------------------
 # Config — can be overridden by caller
 # ---------------------------------------------------------------------------
 
-# Root of the C source tree (relative to repo root)
-GIT_FOLDER   = "data/P3_MCP_Application/cmake-src/src"
+# Default source folder. Empty by default — callers (e.g. the Streamlit
+# UI after a codebase upload) pass a `git_folder` argument to pre_processing()
+# at runtime. Override globally with the SWREQ_GIT_FOLDER env var if needed.
+GIT_FOLDER   = os.getenv("SWREQ_GIT_FOLDER", "")
 PARSED_DIR   = "data/C_Parsed"
 
 
@@ -179,31 +181,78 @@ def get_identifier_mapping(orig_src: str, emb_src: str) -> dict:
 # Preprocessing — GCC expand + pycparser parse
 # ---------------------------------------------------------------------------
 
-def pre_processing(selected_module: str):
+def pre_processing(selected_module: str, git_folder: str | None = None):
     """
     GCC-preprocess a C source file and write the result to data/C_Parsed/.
     Returns (output_file_path, input_file_path).
-    """
-    pkg_path         = os.path.dirname(pycparser.__file__)
-    fake_include     = os.path.join(pkg_path, "utils", "fake_libc_include")
 
-    input_file  = f"{GIT_FOLDER}/{selected_module}"
+    Parameters
+    ----------
+    selected_module : filename of the .c file (e.g. "Wind.c")
+    git_folder      : directory containing the .c file. Required — either
+                      passed by the caller (Streamlit UI after codebase
+                      upload) or set via the SWREQ_GIT_FOLDER env var.
+    """
+    src_folder = git_folder or GIT_FOLDER
+    if not src_folder:
+        raise ValueError(
+            "No source folder provided. Pass `git_folder=...` or set the "
+            "SWREQ_GIT_FOLDER environment variable."
+        )
+
+    # Locate fake_libc_include — required by GCC -nostdinc to find stub
+    # versions of <math.h>, <stdio.h>, etc., that pycparser can swallow.
+    #
+    # Search order:
+    #   1. FAKE_LIBC_INCLUDE env var       (explicit override)
+    #   2. <repo_root>/fake_libc_include   (bundled copy, used in Docker)
+    #   3. pycparser source distribution   (local installs from GitHub)
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates = [
+        os.environ.get("FAKE_LIBC_INCLUDE"),
+        str(repo_root / "fake_libc_include"),
+        os.path.join(os.path.dirname(pycparser.__file__), "utils", "fake_libc_include"),
+    ]
+    fake_include = next((c for c in candidates if c and Path(c).exists()), None)
+    if fake_include is None:
+        raise RuntimeError(
+            "fake_libc_include not found. Either:\n"
+            "  • set FAKE_LIBC_INCLUDE to its absolute path,\n"
+            "  • copy it to <repo_root>/fake_libc_include/, or\n"
+            "  • install pycparser from source (pip install git+https://github.com/eliben/pycparser)."
+        )
+
+    input_file  = f"{src_folder}/{selected_module}"
     output_file = f"{PARSED_DIR}/{selected_module.replace('.c', '.i')}"
     os.makedirs(PARSED_DIR, exist_ok=True)
 
-    cmd = [
-        "gcc", "-E", "-nostdinc", input_file,
-        "-I./include",
-        f"-I./{GIT_FOLDER}/AutoPilot",
-        f"-I./{GIT_FOLDER}/Common",
-        f"-I./{GIT_FOLDER}/DataControl",
-        f"-I./{GIT_FOLDER}/GNSS",
-        f"-I./{GIT_FOLDER}/Guidance",
-        f"-I./{GIT_FOLDER}/Nav",
-        f"-I{fake_include}",
-    ]
+    # Auto-discover include directories: any subfolder of src_folder that
+    # contains at least one .h file becomes a -I path. This replaces the
+    # old hardcoded list (AutoPilot/Common/DataControl/...) so any codebase
+    # layout works.
+    include_dirs = [src_folder]
+    src_path = Path(src_folder)
+    if src_path.exists():
+        for sub in src_path.rglob("*"):
+            if sub.is_dir() and any(sub.glob("*.h")):
+                include_dirs.append(str(sub))
+
+    cmd = ["gcc", "-E", "-nostdinc", input_file]
+    for inc in include_dirs:
+        cmd.extend(["-I", inc])
+    cmd.extend(["-I", fake_include])
+
+    # Capture stderr so callers see the real GCC error on failure
     with open(output_file, "w") as f:
-        subprocess.run(cmd, stdout=f, check=True)
+        result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, text=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"GCC preprocessing failed for {input_file} "
+            f"(exit {result.returncode}).\n"
+            f"Command: {' '.join(cmd)}\n\n"
+            f"GCC stderr:\n{result.stderr}"
+        )
 
     return output_file, input_file
 

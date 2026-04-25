@@ -15,6 +15,7 @@ import ast as asast
 import json
 import sys
 import time
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -53,11 +54,21 @@ from src.utils.prompt_templates import (
 )
 from src.utils.word_output import generate_doc_from_cleaned_and_df
 
+from core.auth import require_login, logout_button
+
+# Block here until authenticated; populates st.session_state["api_token"]
+_user = require_login()
+logout_button()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
 
-API_URL        = "http://127.0.0.1:8000"
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
+
+def _api_headers() -> dict:
+    return {"Authorization": f"Bearer {st.session_state.get('api_token', '')}"}
+
 GIT_FOLDER     = ""  # set dynamically via upload below
 ARTIFACTS_DIR  = Path("artifacts")
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -76,7 +87,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 
 try:
-    _cfg_resp    = requests.get(f"{API_URL}/config", timeout=3)
+    _cfg_resp    = requests.get(f"{API_URL}/config", timeout=3, headers=_api_headers())
     _active_cfg  = _cfg_resp.json() if _cfg_resp.ok else {}
 except Exception:
     _active_cfg  = {}
@@ -228,7 +239,7 @@ with tab1:
 
     # ── API health + active model info ───────────────────────────────────
     try:
-        requests.get(f"{API_URL}/health", timeout=2)
+        requests.get(f"{API_URL}/health", timeout=2, headers=_api_headers())
         st.caption(f"API ✅  Ollama ✅  — model: `{STAGE1_MODEL}` — outputs saved to `artifacts/`")
     except Exception:
         st.error("API ❌  — start the server with `bash run.sh`")
@@ -256,8 +267,11 @@ with tab1:
         if uploaded_zip and uploaded_zip.file_id != _last_processed:
             import zipfile, tempfile
             from collections import Counter
-
-            extract_root = Path("data")
+            import shutil
+            extract_root = Path("data") / "uploaded_codebase"
+            # Clear any previous upload to avoid permission/leftover issues
+            if extract_root.exists():
+                shutil.rmtree(extract_root, ignore_errors=True)
             extract_root.mkdir(parents=True, exist_ok=True)
 
             with tempfile.TemporaryDirectory() as tmp:
@@ -331,12 +345,12 @@ with tab1:
         # the Stage 1 model, giving each batch the same clean-start
         # behaviour that `./run.sh` provides on a fresh server start.
         try:
-            requests.post(f"{API_URL}/reset_stage1", timeout=120)
+            requests.post(f"{API_URL}/reset_stage1", timeout=120, headers=_api_headers())
         except Exception as exc:
             st.warning(f"Stage 1 reset failed: {exc} — continuing anyway.")
 
         with st.spinner("Parsing C source and generating requirements…"):
-            output_file, input_file = pre_processing(selected_module)
+            output_file, input_file = pre_processing(selected_module, git_folder=_git_folder)
             functions = generate_functions(output_file, input_file)
             st.session_state["functions"] = functions
 
@@ -375,10 +389,10 @@ with tab1:
 
                     # ── Pass 1: Generate raw requirements from C code ──────────
                     response = requests.post(
-                        f"{API_URL}/generate",
-                        json={"prompts": [name_prompt, reqs_prompt]},
-                        timeout=300,
-                    )
+                        f"{API_URL}/generate", 
+                        json={"prompts": [name_prompt, reqs_prompt]}, 
+                        timeout=300, 
+                        headers=_api_headers())
 
                     if response.status_code != 200:
                         placeholder.error(f"Model failed for {fn['name']}: {response.text}")
@@ -456,6 +470,7 @@ with tab1:
                             f"{API_URL}/generate",
                             json={"prompts": ["N/A", post_prompt]},
                             timeout=300,
+                            headers=_api_headers()
                         )
                         if r2.status_code == 200:
                             raw_replacements = r2.json().get("requirements", ["", ""])[1]
@@ -761,6 +776,7 @@ with tab2:
                     "draft":         group.draft,
                 },
                 timeout=300,
+                headers=_api_headers()
             )
 
             if resp.status_code != 200:

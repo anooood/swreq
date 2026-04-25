@@ -42,6 +42,8 @@ Fixes applied here:
 """
 
 from __future__ import annotations
+from fastapi import Depends
+from api.auth import require_user
 
 import logging
 import os
@@ -339,7 +341,7 @@ def get_config():
 
 
 @app.post("/reset_stage1", response_model=ResetResponse)
-def reset_stage1():
+def reset_stage1(user: str = Depends(require_user)):
     """
     Evict ALL models from Ollama's memory, then reload only Stage 1.
 
@@ -370,12 +372,13 @@ def reset_stage1():
 
 
 @app.post("/generate", response_model=GenerateResponse)
-def generate(req: GenerateRequest):
+def generate(req: GenerateRequest, user: str = Depends(require_user)):
     """
     Stage 1: C code → LLR.
     Uses STAGE1_MODEL (set in configs/model.yaml).
     Accepts [heading_prompt, body_prompt]; returns [heading, body].
     """
+    logger.info("generate called by %s", user)
     if len(req.prompts) < 2:
         raise HTTPException(status_code=422, detail="Expected exactly 2 prompts.")
 
@@ -400,7 +403,7 @@ def generate(req: GenerateRequest):
 
 
 @app.post("/rewrite", response_model=RewriteResponse)
-def rewrite(req: RewriteRequest):
+def rewrite(req: RewriteRequest, user: str = Depends(require_user)):
     """
     Stage 2: LLR → Jama-compliant LLR.
     Uses STAGE2_MODEL (set in configs/model.yaml).

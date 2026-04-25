@@ -61,3 +61,7 @@ Thumbs.db
 # Temporary
 *.tmp
 *.bak
+data/users.db
+data/uploaded_codebase/
+data/C_Parsed/
+data/P3_MCP_Application/

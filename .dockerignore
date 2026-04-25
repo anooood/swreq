@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+
+# Local data & outputs — these are volume-mounted at runtime
+data/
+!data/references
+artifacts/
+logs/
+users.db
+*.log
+
+# VCS & editors
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Dev / test
+tests/
+.pytest_cache/
+.ruff_cache/
+notebooks/llm_streamlit_app_old.py

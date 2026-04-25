@@ -1,0 +1,75 @@
+# ─────────────────────────────────────────────────────────────────────────
+# docker-compose.yml
+#
+# Runs the full swreq stack:
+#   api  —  FastAPI   (port 8000)
+#   ui   —  Streamlit (port 8501)
+#
+# Ollama is NOT managed here. It runs either on the Docker host
+# (http://host.docker.internal:11434) or as its own service you manage.
+#
+# Quick start:
+#   cp .env.example .env
+#   # edit SWREQ_API_SECRET and OLLAMA_BASE_URL in .env
+#   docker compose up --build -d
+#   docker compose exec api python manage_users.py init
+#   docker compose exec api python manage_users.py add
+# ─────────────────────────────────────────────────────────────────────────
+services:
+  api:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.api
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    image: swreq-api:latest
+    container_name: swreq-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      OLLAMA_BASE_URL:   ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      STAGE1_MODEL:      ${STAGE1_MODEL:-qwen3-coder:30b}
+      STAGE2_MODEL:      ${STAGE2_MODEL:-qwen2.5:latest}
+      SWREQ_API_SECRET:  ${SWREQ_API_SECRET:?set SWREQ_API_SECRET in .env}
+      SWREQ_DB_PATH:     /app/data/users.db
+    volumes:
+      - ./data:/app/data                 # persists users.db + parsed C files
+      - ./artifacts:/app/artifacts       # persists outputs + logs
+    extra_hosts:
+      # Makes host.docker.internal resolve on Linux (macOS/Windows get it free)
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  ui:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.ui
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    image: swreq-ui:latest
+    container_name: swreq-ui
+    ports:
+      - "${UI_PORT:-8501}:8501"
+    environment:
+      API_URL:           http://api:8000
+      SWREQ_API_SECRET:  ${SWREQ_API_SECRET:?set SWREQ_API_SECRET in .env}
+      SWREQ_DB_PATH:     /app/data/users.db
+    volumes:
+      - ./data:/app/data             # shares users.db with the API
+      - ./artifacts:/app/artifacts
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  swreq-data:
