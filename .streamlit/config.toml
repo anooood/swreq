@@ -1,0 +1,23 @@
+# ─────────────────────────────────────────────────────────────────────────
+# .streamlit/config.toml
+# Global Streamlit configuration for the swreq UI.
+#
+# The [theme] section forces a dark theme regardless of the user's
+# browser preference. To let the user toggle, remove this section and
+# Streamlit will fall back to the user's OS theme.
+# ─────────────────────────────────────────────────────────────────────────
+
+[theme]
+base               = "dark"
+primaryColor       = "#4DA3FF"   # accent — buttons, focused inputs, progress bars
+backgroundColor    = "#0E1117"   # main page background
+secondaryBackgroundColor = "#1C1F26"   # sidebar, expander, dataframe headers
+textColor          = "#E6E6E6"
+font               = "sans serif"
+
+[server]
+headless                 = true
+runOnSave                = false
+
+[browser]
+gatherUsageStats = false

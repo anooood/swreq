@@ -54,11 +54,24 @@ from src.utils.prompt_templates import (
 )
 from src.utils.word_output import generate_doc_from_cleaned_and_df
 
-from core.auth import require_login, logout_button
+from core.auth import require_login, sidebar_user_info
 
-# Block here until authenticated; populates st.session_state["api_token"]
+# ─────────────────────────────────────────────────────────────────────────────
+# Page config — must be the very first Streamlit call
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.set_page_config(
+    page_title="Software Requirements Generator",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Login gate — populates st.session_state["api_token"]
 _user = require_login()
-logout_button()
+
+# User info + logout at the top of the sidebar
+sidebar_user_info()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config
@@ -72,15 +85,6 @@ def _api_headers() -> dict:
 GIT_FOLDER     = ""  # set dynamically via upload below
 ARTIFACTS_DIR  = Path("artifacts")
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Page config
-# ─────────────────────────────────────────────────────────────────────────────
-
-st.set_page_config(
-    page_title="Software Requirements Generator",
-    layout="wide",
-)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Active model config — read from server at startup (display only)
@@ -187,7 +191,7 @@ def is_trivial(req: str) -> bool:
     return any(re.search(rule, req, re.IGNORECASE) for rule in TRIVIAL_RULES)
 
 def filter_trivial_requirements(requirements: list[str]) -> list[str]:
-    
+
     # Strip leading numbering (e.g. "1.", "10.")
     stripped = [re.sub(r'^\d+\.\s*', '', req.strip()) for req in requirements]
     kept = [req for req in stripped if req.strip() and not is_trivial(req)]
@@ -207,19 +211,107 @@ for _key, _default in [
     ("jama_result", None),
     ("hlr_result", None),
     ("inference_times", []),
+    ("stage2_inference_times", []),
     ("variables_leaked_all", []),
     ("globals_missing_all", []),
     ("cleaned_headers", None),
     ("git_folder", GIT_FOLDER),
+    ("selected_module", None),
 ]:
     if _key not in st.session_state:
         st.session_state[_key] = _default
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  SIDEBAR — Codebase upload + module selection
+# ═════════════════════════════════════════════════════════════════════════════
+
+with st.sidebar:
+    st.header("📁 Codebase")
+    st.caption("Upload your C codebase (as a ZIP file), then pick a module to analyse.")
+
+    _current_folder = st.session_state.get("git_folder", "")
+    _folder_exists  = bool(_current_folder) and Path(_current_folder).exists()
+
+    if _folder_exists:
+        st.success("Codebase loaded")
+        st.caption(f"`{_current_folder}`")
+    else:
+        st.info("No codebase loaded yet.")
+
+    uploaded_zip = st.file_uploader(
+        "Upload codebase ZIP",
+        type=["zip"],
+        key="codebase_zip",
+        help="The folder containing the most .c files will be auto-detected.",
+    )
+
+    # Only process each upload once. Streamlit's file_uploader keeps the
+    # file across reruns — without this guard, every button click on the
+    # page (Apply changes, Save CSV, etc.) would re-extract the ZIP.
+    _last_processed = st.session_state.get("_last_processed_zip_id")
+    if uploaded_zip and uploaded_zip.file_id != _last_processed:
+        import zipfile, tempfile
+        from collections import Counter
+        import shutil
+        extract_root = Path("data") / "uploaded_codebase"
+        # Clear any previous upload to avoid permission/leftover issues
+        if extract_root.exists():
+            shutil.rmtree(extract_root, ignore_errors=True)
+        extract_root.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_zip = Path(tmp) / uploaded_zip.name
+            tmp_zip.write_bytes(uploaded_zip.read())
+            with zipfile.ZipFile(tmp_zip, "r") as z:
+                z.extractall(extract_root)
+
+        # Auto-detect the folder with the most .c files
+        c_files = list(extract_root.rglob("*.c"))
+        if c_files:
+            folder_counts   = Counter(str(f.parent) for f in c_files)
+            detected_folder = folder_counts.most_common(1)[0][0]
+            st.session_state["git_folder"]            = detected_folder
+            st.session_state["_last_processed_zip_id"] = uploaded_zip.file_id
+            on_module_change()
+            st.success(f"Detected: `{detected_folder}`")
+            st.rerun()
+        else:
+            st.session_state["_last_processed_zip_id"] = uploaded_zip.file_id
+            st.error("No `.c` files found in the uploaded ZIP.")
+
+    # Module selector — only shown once a codebase is loaded
+    _git_folder = st.session_state.get("git_folder", "")
+    if _git_folder and Path(_git_folder).exists():
+        modules = sorted(Path(_git_folder).glob("*.c"))
+        if modules:
+            module_names = [m.name for m in modules]
+
+            # Preserve previously-selected module across reruns
+            prev = st.session_state.get("selected_module")
+            default_idx = module_names.index(prev) if prev in module_names else 0
+
+            selected_module = st.selectbox(
+                "C module",
+                module_names,
+                index=default_idx,
+                key="_sidebar_module_selector",
+            )
+
+            # If the user picked a different module, reset state
+            if selected_module != st.session_state.get("selected_module"):
+                st.session_state["selected_module"] = selected_module
+                on_module_change()
+        else:
+            st.warning("No `.c` files found in the detected folder.")
+            st.session_state["selected_module"] = None
+    else:
+        st.session_state["selected_module"] = None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main title + tabs
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.title("🔧 Software Requirements Generator")
+st.title("💻⚙️ Software Requirements Generator")
 st.caption("Stage 1: C code → LLR  |  Stage 2: LLR → Jama LLR")
 
 tab1, tab2 = st.tabs(["📄 Stage 1 — Code → LLR", "📋 Stage 2 — LLR → Jama LLR"])
@@ -230,9 +322,9 @@ tab1, tab2 = st.tabs(["📄 Stage 1 — Code → LLR", "📋 Stage 2 — LLR →
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab1:
-    st.header("Stage 1: C Code → Low-Level Requirements")
+    st.header("Stage 1: C Code → Low-Level Requirements (LLRs)")
     st.markdown(
-        "Select a C module from your codebase. The tool parses the source, "
+        "Pick a C module from the sidebar. The tool parses the source, "
         "extracts each function, and generates detailed software requirements "
         "using the LLM."
     )
@@ -240,77 +332,25 @@ with tab1:
     # ── API health + active model info ───────────────────────────────────
     try:
         requests.get(f"{API_URL}/health", timeout=2, headers=_api_headers())
-        st.caption(f"API ✅  Ollama ✅  — model: `{STAGE1_MODEL}` — outputs saved to `artifacts/`")
+        st.caption(f"LLM: `{STAGE1_MODEL}` — outputs saved to `artifacts/`")
     except Exception:
         st.error("API ❌  — start the server with `bash run.sh`")
 
     st.divider()
 
-    # ── Codebase upload ───────────────────────────────────────────────────
-    _current_folder = st.session_state.get("git_folder", "")
-    _folder_exists  = bool(_current_folder) and Path(_current_folder).exists()
-
-    with st.expander("📁 Upload Codebase (ZIP)", expanded=not _folder_exists):
-        st.markdown(
-            "Zip your codebase folder and upload it here. "
-            "The tool will automatically detect the folder containing `.c` files."
-        )
-        if _folder_exists:
-            st.caption(f"Current source folder: `{_current_folder}`")
-
-        uploaded_zip = st.file_uploader("Upload codebase ZIP", type=["zip"], key="codebase_zip")
-
-        # Only process each upload once. Streamlit's file_uploader keeps the
-        # file across reruns — without this guard, every button click on the
-        # page (Apply changes, Save CSV, etc.) would re-extract the ZIP.
-        _last_processed = st.session_state.get("_last_processed_zip_id")
-        if uploaded_zip and uploaded_zip.file_id != _last_processed:
-            import zipfile, tempfile
-            from collections import Counter
-            import shutil
-            extract_root = Path("data") / "uploaded_codebase"
-            # Clear any previous upload to avoid permission/leftover issues
-            if extract_root.exists():
-                shutil.rmtree(extract_root, ignore_errors=True)
-            extract_root.mkdir(parents=True, exist_ok=True)
-
-            with tempfile.TemporaryDirectory() as tmp:
-                tmp_zip = Path(tmp) / uploaded_zip.name
-                tmp_zip.write_bytes(uploaded_zip.read())
-                with zipfile.ZipFile(tmp_zip, "r") as z:
-                    z.extractall(extract_root)
-
-            # Auto-detect the folder with the most .c files
-            c_files = list(extract_root.rglob("*.c"))
-            if c_files:
-                folder_counts   = Counter(str(f.parent) for f in c_files)
-                detected_folder = folder_counts.most_common(1)[0][0]
-                st.session_state["git_folder"]            = detected_folder
-                st.session_state["_last_processed_zip_id"] = uploaded_zip.file_id
-                on_module_change()
-                st.success(f"✅ Codebase uploaded! Detected source folder: `{detected_folder}`")
-            else:
-                st.session_state["_last_processed_zip_id"] = uploaded_zip.file_id
-                st.error("No `.c` files found in the uploaded ZIP.")
-
-    # Module selector — requires an uploaded codebase
+    # Gate the rest of Stage 1 on having a codebase + selected module
     _git_folder = st.session_state.get("git_folder", "")
     if not _git_folder or not Path(_git_folder).exists():
-        st.info("⬆ Upload a codebase ZIP above to get started.")
+        st.info("⬅ Upload a codebase ZIP from the sidebar to get started.")
+        st.stop()
+
+    selected_module = st.session_state.get("selected_module")
+    if not selected_module:
+        st.warning("⬅ Select a C module from the sidebar.")
         st.stop()
 
     modules = sorted(Path(_git_folder).glob("*.c"))
-    if not modules:
-        st.warning(f"No `.c` files found in `{_git_folder}`. "
-                   "Use the upload section above to add your codebase.")
-        st.stop()
-
     modules_names = [m.name.replace(".c", "") for m in modules]
-    selected_module = st.selectbox(
-        "Select a C module:",
-        [m.name for m in modules],
-        on_change=on_module_change,
-    )
 
     with open(Path(_git_folder) / selected_module, encoding="utf-8", errors="ignore") as f:
         source_preview = f.read()
@@ -389,9 +429,9 @@ with tab1:
 
                     # ── Pass 1: Generate raw requirements from C code ──────────
                     response = requests.post(
-                        f"{API_URL}/generate", 
-                        json={"prompts": [name_prompt, reqs_prompt]}, 
-                        timeout=300, 
+                        f"{API_URL}/generate",
+                        json={"prompts": [name_prompt, reqs_prompt]},
+                        timeout=300,
                         headers=_api_headers())
 
                     if response.status_code != 200:
@@ -453,14 +493,6 @@ with tab1:
 
                     leaked = list(dict.fromkeys(leaked))  # deduplicate, preserve order
 
-                    # Ask the LLM to translate each leaked identifier into a
-                    # plain-English conceptual phrase, then substitute in-place.
-                    # This is the pass that was previously commented out.
-                    # The original code broke because it used ast.literal_eval()
-                    # on raw LLM output, which fails whenever the model doesn't
-                    # return a perfectly-formed Python list literal.
-                    # Fix: parse the response line-by-line instead.
-
                     if leaked:
                         post_prompt = identifier_rewrite_prompt.format(
                             REQUIREMENTS=req_pass2,
@@ -513,11 +545,6 @@ with tab1:
                         "Globals":              mapping,
                     }
 
-                # Render the full editable form inline as soon as this function
-                # is generated. This gives incremental feedback instead of
-                # waiting for all functions to finish. After generation completes
-                # (generation_completed = True), the persistent block below
-                # takes over on subsequent reruns.
                 req = st.session_state["requirements"][i]
 
                 with placeholder.container():
@@ -566,11 +593,6 @@ with tab1:
         st.session_state["generation_completed"] = True
 
     # ── Persistent requirements rendering ─────────────────────────────────────
-    # Rendered from session_state on every rerun, so Apply/Save button clicks
-    # (which trigger full script reruns) don't wipe the UI.
-    # Skipped on the run that just finished generation — the generation loop
-    # already rendered the forms inline, so we'd otherwise get duplicate keys.
-
     if (st.session_state["generation_completed"]
             and st.session_state["requirements"]
             and not _did_generate_this_run):
@@ -678,7 +700,7 @@ with tab1:
 
         st.info("➡ Use the **Stage 2** tab to convert these LLRs into Jama-compliant LLRs.")
     else:
-        st.info("No requirements yet. Select a module and click **Generate LLRs**.")
+        st.info("No requirements yet. Click **Generate LLRs** to start.")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -686,14 +708,14 @@ with tab1:
 # ═════════════════════════════════════════════════════════════════════════════
 
 with tab2:
-    st.header("Stage 2: LLR → Jama-Compliant Low-Level Requirements")
+    st.header("Stage 2: LLRs → Jama-Compliant LLRs")
     st.markdown(
-        "Upload a CSV of LLRs (columns: `Function Name`, `Requirements`) "
-        "or use the output from Stage 1. The LLM rewrites each draft into a "
-        "formal Jama-compliant **shall** statement."
+        "Upload a previously saved CSV file of LLRs "
+        "or use the existing output from Stage 1. The LLM rewrites each draft into "
+        "formal Jama-compliant **shall** statements."
     )
 
-    st.caption(f"Model: `{STAGE2_MODEL}` — configured in `configs/model.yaml`")
+    st.caption(f"Model: `{STAGE2_MODEL}` — outputs saved to `artifacts/`")
     st.divider()
 
     # Input source selector
@@ -766,9 +788,14 @@ with tab2:
         hlrs_all: list[HighLevelRequirement] = []
         hlr_counter = 0
 
+        # Reset timer state for this batch.
+        st.session_state["stage2_inference_times"] = []
+        batch_start = time.time()
+
         for idx, group in enumerate(function_groups):
             status_box.info(f"Rewriting [{idx+1}/{len(function_groups)}]: **{group.function_name}**…")
 
+            t0 = time.time()
             resp = requests.post(
                 f"{API_URL}/rewrite",
                 json={
@@ -778,6 +805,8 @@ with tab2:
                 timeout=300,
                 headers=_api_headers()
             )
+            elapsed = time.time() - t0
+            st.session_state["stage2_inference_times"].append(elapsed)
 
             if resp.status_code != 200:
                 st.warning(f"Rewrite failed for {group.function_name}: {resp.text}")
@@ -797,7 +826,11 @@ with tab2:
 
             progress_bar.progress((idx + 1) / len(function_groups))
 
-        status_box.success(f"✅ {len(hlrs_all)} LLR(s) generated from {len(function_groups)} function(s).")
+        batch_elapsed = time.time() - batch_start
+        status_box.success(
+            f"✅ {len(hlrs_all)} LLR(s) generated from {len(function_groups)} function(s) "
+            f"in {round(batch_elapsed / 60, 2)} min."
+        )
 
         result = MergeResult(
             hlrs           = hlrs_all,
@@ -812,6 +845,14 @@ with tab2:
     if st.session_state.get("jama_result"):
         result = st.session_state["jama_result"]
         st.subheader(f"Generated LLRs ({len(result.hlrs)} total)")
+
+        _stage2_times = st.session_state.get("stage2_inference_times", [])
+        if _stage2_times:
+            _total_s2 = sum(_stage2_times)
+            st.markdown(
+                f"**Total inference time:** {round(_total_s2 / 60, 2)} min  "
+                f"({len(_stage2_times)} call(s), avg {round(_total_s2 / len(_stage2_times), 2)} s)"
+            )
 
         # Preview table
         preview_rows = [
@@ -828,35 +869,14 @@ with tab2:
         st.dataframe(pd.DataFrame(preview_rows), use_container_width=True)
 
         st.subheader("📤 Export Stage 2 Outputs")
-        col_xlsx, col_csv2 = st.columns(2)
 
-        with col_xlsx:
-            if st.button("📊 Save Jama Excel (.xlsx)"):
-                from src.pipelines.exporter import export_to_excel
+        if st.button("📊 Save Jama Excel (.xlsx)", type="primary"):
+            from src.pipelines.exporter import export_to_excel
 
-                stem      = groups_df["Function Name"].iloc[0].split()[0] if groups_df is not None else "output"
-                xlsx_path = _artifacts_path(f"{stem}_Jama_LLR.xlsx")
-                export_to_excel(result, str(xlsx_path), filename=stem)
-                st.success(f"Saved → `{xlsx_path}`")
-
-        with col_csv2:
-            if st.button("📄 Save Jama CSV"):
-                stem     = groups_df["Function Name"].iloc[0].split()[0] if groups_df is not None else "output"
-                csv_path = _artifacts_path(f"{stem}_Jama_LLR.csv")
-
-                rows = [
-                    {
-                        "ID":                  h.id,
-                        "Function Name":       h.function_name,
-                        "Name":                h.name,
-                        "Description":         h.description,
-                        "Verification Method": h.verification_method,
-                        "Requirement Type":    h.requirement_type,
-                    }
-                    for h in result.hlrs
-                ]
-                pd.DataFrame(rows).to_csv(csv_path, index=False)
-                st.success(f"Saved → `{csv_path}`")
+            stem      = groups_df["Function Name"].iloc[0].split()[0] if groups_df is not None else "output"
+            xlsx_path = _artifacts_path(f"{stem}_Jama_LLR.xlsx")
+            export_to_excel(result, str(xlsx_path), filename=stem)
+            st.success(f"Saved → `{xlsx_path}`")
     elif groups_df is not None:
         st.info("Click **Generate Jama LLRs** to start Stage 2.")
     else:

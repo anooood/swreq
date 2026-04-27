@@ -3,10 +3,11 @@ core/auth.py
 -------------
 Streamlit login form + auth gating for the Streamlit UI.
 
-Usage in notebooks/llm_streamlit_app.py:
+Usage in src/llm_streamlit_app.py:
 
-    from core.auth import require_login
+    from core.auth import require_login, sidebar_user_info
     user = require_login()                  # blocks until authenticated
+    sidebar_user_info()                     # render user + logout at top of sidebar
     # ... rest of the app ...
 
 Also exposes `issue_api_token()` used by the UI to authenticate its
@@ -59,40 +60,68 @@ def verify_api_token(token: str) -> str | None:
 
 def require_login() -> str:
     """
-    Render the login form and block until the user is authenticated.
-    Returns the logged-in username.
+    Render the login form (centered, fixed-width) and block until the
+    user is authenticated. Returns the logged-in username.
     """
     init_db()
 
     if st.session_state.get("authenticated"):
         return st.session_state["username"]
 
-    st.title("🔐 Sign in")
-    st.caption("Contact your administrator if you don't have an account.")
+    # Center the login form using a 1:2:1 column layout so it doesn't
+    # stretch to fill the wide page on `layout="wide"`.
+    _left, center, _right = st.columns([1, 2, 1])
+    with center:
+        st.title("🔐 Sign in")
+        st.caption("Contact your administrator if you don't have an account.")
 
-    with st.form("login_form"):
-        username = st.text_input("Username", key="_login_username").strip()
-        password = st.text_input("Password", type="password", key="_login_password")
-        submitted = st.form_submit_button("Sign in", type="primary")
+        with st.form("login_form"):
+            username = st.text_input("Username", key="_login_username").strip()
+            password = st.text_input("Password", type="password", key="_login_password")
+            submitted = st.form_submit_button("Sign in", type="primary")
 
-    if submitted:
-        if verify_user(username, password):
-            st.session_state["authenticated"] = True
-            st.session_state["username"]      = username
-            st.session_state["user_id"]       = get_user_id(username)
-            st.session_state["api_token"]     = issue_api_token(username)
-            st.rerun()
-        else:
-            st.error("Invalid username or password")
+        if submitted:
+            if verify_user(username, password):
+                st.session_state["authenticated"] = True
+                st.session_state["username"]      = username
+                st.session_state["user_id"]       = get_user_id(username)
+                st.session_state["api_token"]     = issue_api_token(username)
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
 
     st.stop()  # nothing below runs until authenticated
 
 
-def logout_button() -> None:
-    """Render a Logout button in the sidebar."""
+def sidebar_user_info() -> None:
+    """
+    Render user info and a Logout button at the TOP of the sidebar,
+    followed by a divider so the rest of the sidebar content sits
+    below it cleanly.
+
+    Call this once, before any other sidebar content.
+    """
     with st.sidebar:
-        st.markdown(f"👤 **{st.session_state.get('username', 'unknown')}**")
-        if st.button("Log out"):
-            for k in ("authenticated", "username", "user_id", "api_token"):
-                st.session_state.pop(k, None)
-            st.rerun()
+        col_user, col_btn = st.columns([2, 1], vertical_alignment="center")
+        with col_user:
+            st.markdown(
+                f"👤 **{st.session_state.get('username', 'unknown')}**"
+            )
+        with col_btn:
+            if st.button("Log out", key="_logout_btn", use_container_width=True):
+                for k in ("authenticated", "username", "user_id", "api_token"):
+                    st.session_state.pop(k, None)
+                st.rerun()
+        st.divider()
+
+
+# ── Legacy aliases kept for backward compatibility ──────────────────────────
+
+def logout_button() -> None:
+    """Deprecated — use sidebar_user_info() instead."""
+    sidebar_user_info()
+
+
+def top_bar() -> None:
+    """Deprecated — use sidebar_user_info() instead."""
+    sidebar_user_info()

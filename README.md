@@ -1,4 +1,4 @@
-# swreq — Software Requirements Generator
+# Software Requirements Generator
 
 Parses C source code and produces formal, **Jama-compliant Low-Level Requirements (LLR)** through a fully automated two-stage LLM pipeline.
 

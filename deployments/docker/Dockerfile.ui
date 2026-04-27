@@ -20,9 +20,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY core/      ./core/
-COPY src/       ./src/
-COPY configs/   ./configs/
+COPY core/        ./core/
+COPY src/         ./src/
+COPY configs/     ./configs/
+COPY .streamlit/  ./.streamlit/
 COPY data/references/        ./data/references/
 COPY data/fake_libc_include/ ./data/fake_libc_include/
 COPY manage_users.py  ./
