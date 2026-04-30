@@ -44,6 +44,7 @@ artifacts/*.csv
 # Generated output files
 *.csv
 *.xlsx
+*.docx
 
 # Logs
 logs/
