@@ -35,5 +35,4 @@ stage1:
 # Needs strong formal writing and reliable JSON output.
 # qwen2.5 has no thinking mode — fully deterministic with temperature=0.
 stage2:
-  # model: qwen2.5:latest
-  model: qwen3.5:35b
+  model: qwen2.5:latest

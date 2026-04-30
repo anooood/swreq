@@ -332,7 +332,7 @@ with tab1:
     # ── API health + active model info ───────────────────────────────────
     try:
         requests.get(f"{API_URL}/health", timeout=2, headers=_api_headers())
-        st.caption(f"LLM: `{STAGE1_MODEL}` — outputs saved to `artifacts/`")
+        st.caption(f"LLM: `{STAGE1_MODEL}`")
     except Exception:
         st.error("API ❌  — start the server with `bash run.sh`")
 
@@ -656,52 +656,65 @@ with tab1:
             st.success(f"✅ All {_total} requirements approved — ready for Stage 2.")
         else:
             st.warning(f"⏳ {_approved} / {_total} requirements approved. "
-                       "Check **User approved** and click **Apply changes** on every requirement "
-                       "before proceeding to Stage 2.")
+                    "Check **User approved** and click **Apply changes** on every requirement "
+                    "before proceeding to Stage 2.")
 
         df_llr = pd.DataFrame.from_dict(st.session_state["requirements"], orient="index")
+        module_stem = selected_module.replace(".c", "")
 
+        # ── Build the Word document once, in memory + on disk ────────────────
+        docx_path = _artifacts_path(f"{module_stem}_LLR.docx")
+
+        log_row = {
+            "Module":          selected_module,
+            "Leaked Syntax":   json.dumps(list(set(st.session_state["variables_leaked_all"]))),
+            "Missing Globals": json.dumps(list(set(st.session_state["globals_missing_all"]))),
+        }
+        log_path = ARTIFACTS_DIR / "run_log.xlsx"
+        append_df_to_excel(log_path, pd.DataFrame([log_row]))
+
+        generate_doc_from_cleaned_and_df(
+            df=df_llr,
+            cleaned=st.session_state["cleaned_headers"],
+            out_path=str(docx_path),
+            debug=True,
+        )
+        with open(docx_path, "rb") as f:
+            docx_bytes = f.read()
+
+        # ── Build the CSV once, in memory + on disk ──────────────────────────
+        csv_path = _artifacts_path(f"{module_stem}_LLR.csv")
+        rows = [
+            {"Function Name": r["Function"], "Requirements": r["Requirements"]}
+            for r in st.session_state["requirements"].values()
+        ]
+        df_csv = pd.DataFrame(rows, columns=["Function Name", "Requirements"])
+        df_csv.to_csv(csv_path, index=False)
+        csv_bytes = df_csv.to_csv(index=False).encode("utf-8")
+
+        # ── Single-click download buttons ────────────────────────────────────
         col_word, col_csv = st.columns(2)
 
         with col_word:
-            if st.button("📝 Save Word Document"):
-                module_stem = selected_module.replace(".c", "")
-                docx_path   = _artifacts_path(f"{module_stem}_LLR.docx")
-
-                # Log run metadata
-                log_row = {
-                    "Module":          selected_module,
-                    "Leaked Syntax":   json.dumps(list(set(st.session_state["variables_leaked_all"]))),
-                    "Missing Globals": json.dumps(list(set(st.session_state["globals_missing_all"]))),
-                }
-                log_path = ARTIFACTS_DIR / "run_log.xlsx"
-                append_df_to_excel(log_path, pd.DataFrame([log_row]))
-
-                generate_doc_from_cleaned_and_df(
-                    df=df_llr,
-                    cleaned=st.session_state["cleaned_headers"],
-                    out_path=str(docx_path),
-                    debug=True,
-                )
-                st.success(f"Saved → `{docx_path}`")
+            st.download_button(
+                label="📝 Generate Word Document",
+                data=docx_bytes,
+                file_name=docx_path.name,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                type="primary"            )
 
         with col_csv:
-            if st.button("📊 Save CSV"):
-                module_stem = selected_module.replace(".c", "")
-                csv_path    = _artifacts_path(f"{module_stem}_LLR.csv")
-
-                rows = [
-                    {"Function Name": r["Function"], "Requirements": r["Requirements"]}
-                    for r in st.session_state["requirements"].values()
-                ]
-                df_csv = pd.DataFrame(rows, columns=["Function Name", "Requirements"])
-                df_csv.to_csv(csv_path, index=False)
-                st.success(f"Saved → `{csv_path}`")
+            st.download_button(
+                label="📊 Generate CSV",
+                data=csv_bytes,
+                file_name=csv_path.name,
+                mime="text/csv",
+                type="primary"
+            )
 
         st.info("➡ Use the **Stage 2** tab to convert these LLRs into Jama-compliant LLRs.")
     else:
         st.info("No requirements yet. Click **Generate LLRs** to start.")
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  STAGE 2 — LLR → Jama LLR
@@ -715,7 +728,7 @@ with tab2:
         "formal Jama-compliant **shall** statements."
     )
 
-    st.caption(f"Model: `{STAGE2_MODEL}` — outputs saved to `artifacts/`")
+    st.caption(f"Model: `{STAGE2_MODEL}`")
     st.divider()
 
     # Input source selector
@@ -870,13 +883,22 @@ with tab2:
 
         st.subheader("📤 Export Stage 2 Outputs")
 
-        if st.button("📊 Save Jama Excel (.xlsx)", type="primary"):
-            from src.pipelines.exporter import export_to_excel
+        from src.pipelines.exporter import export_to_excel
 
-            stem      = groups_df["Function Name"].iloc[0].split()[0] if groups_df is not None else "output"
-            xlsx_path = _artifacts_path(f"{stem}_Jama_LLR.xlsx")
-            export_to_excel(result, str(xlsx_path), filename=stem)
-            st.success(f"Saved → `{xlsx_path}`")
+        stem      = groups_df["Function Name"].iloc[0].split()[0] if groups_df is not None else "output"
+        xlsx_path = _artifacts_path(f"{stem}_Jama_LLR.xlsx")
+        export_to_excel(result, str(xlsx_path), filename=stem)
+
+        with open(xlsx_path, "rb") as f:
+            xlsx_bytes = f.read()
+
+        st.download_button(
+            label="📊 Generate Jama Excel (.xlsx)",
+            data=xlsx_bytes,
+            file_name=xlsx_path.name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )
     elif groups_df is not None:
         st.info("Click **Generate Jama LLRs** to start Stage 2.")
     else:

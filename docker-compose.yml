@@ -5,6 +5,10 @@
 #   api  —  FastAPI   (port 8000)
 #   ui   —  Streamlit (port 8501)
 #
+# Both services build from the SAME unified Dockerfile, selecting their
+# role via `build.target` (api / ui). The shared base layer is cached, so
+# `docker compose build` only does the heavy lifting once.
+#
 # Ollama is NOT managed here. It runs either on the Docker host
 # (http://host.docker.internal:11434) or as its own service you manage.
 #
@@ -19,7 +23,8 @@ services:
   api:
     build:
       context: .
-      dockerfile: deployments/docker/Dockerfile.api
+      dockerfile: deployments/docker/Dockerfile
+      target: api
       args:
         HOST_UID: ${HOST_UID:-1000}
         HOST_GID: ${HOST_GID:-1000}
@@ -51,7 +56,8 @@ services:
   ui:
     build:
       context: .
-      dockerfile: deployments/docker/Dockerfile.ui
+      dockerfile: deployments/docker/Dockerfile
+      target: ui
       args:
         HOST_UID: ${HOST_UID:-1000}
         HOST_GID: ${HOST_GID:-1000}

@@ -242,17 +242,27 @@ def pre_processing(selected_module: str, git_folder: str | None = None):
         cmd.extend(["-I", inc])
     cmd.extend(["-I", fake_include])
 
-    # Capture stderr so callers see the real GCC error on failure
-    with open(output_file, "w") as f:
-        result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, text=True)
+    # Capture both streams so we can transcode stdout to clean UTF-8.
+    # Using text=False keeps stdout as raw bytes — we don't trust GCC's
+    # encoding choice when the input source might be Windows-1252.
+    result = subprocess.run(cmd, capture_output=True, text=False)
 
     if result.returncode != 0:
+        stderr_text = result.stderr.decode("utf-8", errors="replace")
         raise RuntimeError(
             f"GCC preprocessing failed for {input_file} "
             f"(exit {result.returncode}).\n"
             f"Command: {' '.join(cmd)}\n\n"
-            f"GCC stderr:\n{result.stderr}"
+            f"GCC stderr:\n{stderr_text}"
         )
+
+    # Decode GCC output as Latin-1 first (which always succeeds — every byte
+    # 0x00–0xFF maps to a valid Latin-1 codepoint), then re-encode as UTF-8.
+    # This converts characters like '°' (0xB0) into their proper UTF-8 form
+    # instead of leaving them as raw Latin-1 bytes that confuse pycparser.
+    preprocessed_text = result.stdout.decode("latin-1")
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(preprocessed_text)
 
     return output_file, input_file
 
